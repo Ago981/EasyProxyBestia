@@ -2222,6 +2222,19 @@ class HLSProxy:
             if "manifest.m3u8" in request.path and "range" in headers:
                 del headers["range"]
 
+            # ✅ FIX: Remove 'zstd' from Accept-Encoding to prevent "Can not decode content-encoding" error
+            if "accept-encoding" in headers:
+                ae = headers["accept-encoding"].lower()
+                if "zstd" in ae:
+                    # Replace zstd with nothing, cleaning up commas
+                    new_ae = ae.replace("zstd", "").replace(", ,", ",").strip(", ")
+                    headers["accept-encoding"] = new_ae
+            elif "Accept-Encoding" in headers:
+                ae = headers["Accept-Encoding"].lower()
+                if "zstd" in ae:
+                    new_ae = ae.replace("zstd", "").replace(", ,", ",").strip(", ")
+                    headers["Accept-Encoding"] = new_ae
+
             # Rimuovi esplicitamente headers che potrebbero rivelare l'IP originale
             for h in ["x-forwarded-for", "x-real-ip", "forwarded", "via"]:
                 if h in headers:
