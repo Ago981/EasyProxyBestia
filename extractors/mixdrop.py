@@ -3,14 +3,26 @@ import random
 import re
 import base64
 import asyncio
+import os
 from urllib.parse import urlparse, urljoin, urlencode
 
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
-from aiohttp_socks import ProxyConnector
+from aiohttp_socks import ProxyConnector, ProxyError as AioProxyError
+from python_socks import ProxyError as PyProxyError
 
-from config import FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, get_proxy_for_url, TRANSPORT_ROUTES, GLOBAL_PROXIES, get_connector_for_proxy, get_solver_proxy_url
-from utils.packed import eval_solver
+from config import (
+    FLARESOLVERR_URL, 
+    FLARESOLVERR_TIMEOUT, 
+    get_proxy_for_url, 
+    TRANSPORT_ROUTES, 
+    GLOBAL_PROXIES, 
+    get_connector_for_proxy, 
+    get_solver_proxy_url,
+    SELECTED_PROXY_CONTEXT
+)
+from utils.packed import eval_solver, UnpackingError
+from utils.proxy_manager import FreeProxyManager
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -29,14 +41,83 @@ class MixdropExtractor:
         self.session = None
         self.mediaflow_endpoint = "proxy_stream_endpoint"
         self.proxies = proxies or GLOBAL_PROXIES
+        self.last_used_proxy = None
+        self.proxy_manager = FreeProxyManager.get_instance(
+            "mixdrop",
+            [
+                "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt",
+                "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
+            ]
+        )
 
     async def _get_session(self, url: str = None):
         if self.session is None or self.session.closed:
             timeout = ClientTimeout(total=60, connect=30, sock_read=30)
             proxy = get_proxy_for_url(url, TRANSPORT_ROUTES, self.proxies) if url else None
-            connector = get_connector_for_proxy(proxy) if proxy else TCPConnector(limit=0, use_dns_cache=True)
+            if proxy:
+                self.last_used_proxy = proxy
+                connector = get_connector_for_proxy(proxy)
+            else:
+                connector = TCPConnector(limit=0, use_dns_cache=True)
             self.session = ClientSession(timeout=timeout, connector=connector, headers=self.base_headers)
         return self.session
+
+    def _build_session_for_proxy(self, proxy: str | None) -> ClientSession:
+        timeout = ClientTimeout(total=60, connect=30, sock_read=30)
+        if proxy:
+            connector = get_connector_for_proxy(proxy)
+        else:
+            connector = TCPConnector(limit=0, use_dns_cache=True)
+        return ClientSession(timeout=timeout, connector=connector, headers=self.base_headers)
+
+    async def _get_auto_proxy_pool(self, url: str, headers: dict) -> list[str]:
+        if os.environ.get("MIXDROP_ENABLE_FREE_PROXY_POOL", "true").lower() != "true":
+            return []
+
+        def probe_sync(proxy_url: str) -> bool:
+            try:
+                import cloudscraper
+                scraper = cloudscraper.create_scraper(delay=2)
+                resp = scraper.get(
+                    url,
+                    headers=headers,
+                    timeout=6,
+                    proxies={"http": proxy_url, "https": proxy_url},
+                )
+                return resp.status_code == 200 and len(resp.text) > 100
+            except Exception:
+                return False
+
+        return await self.proxy_manager.get_next_sequence(probe_sync)
+
+    async def _try_free_proxy_fallback(self, url: str, headers: dict):
+        """Tries to fetch the URL using the free proxy pool."""
+        for proxy_url in await self._get_auto_proxy_pool(url, headers):
+            logger.info("Mixdrop: retrying with auto proxy %s", proxy_url)
+            temp_session = None
+            try:
+                temp_session = self._build_session_for_proxy(proxy_url)
+                # For Mixdrop, we call eval_solver which handles the request
+                patterns = [
+                    r'MDCore.wurl ?= ?\"(.*?)\"',
+                    r'wurl ?= ?\"(.*?)\"',
+                    r'src: ?\"(.*?)\"',
+                    r'file: ?\"(.*?)\"',
+                    r'https?://[^\"\']+\.mp4[^\"\']*'
+                ]
+                final_url = await eval_solver(temp_session, url, headers, patterns)
+                if final_url:
+                    self.session = temp_session
+                    self.last_used_proxy = proxy_url
+                    logger.info("Mixdrop: free proxy fallback succeeded with %s", proxy_url)
+                    return final_url
+            except Exception as proxy_exc:
+                logger.warning("Mixdrop: auto proxy %s failed: %s", proxy_url, proxy_exc)
+                self.proxy_manager.report_failure(proxy_url)
+            finally:
+                if temp_session and temp_session is not self.session and not temp_session.closed:
+                    await temp_session.close()
+        return None
 
     async def _request_flaresolverr(self, cmd: str, url: str = None, post_data: str = None, session_id: str = None) -> dict:
         """Performs a request via FlareSolverr."""
@@ -118,25 +199,95 @@ class MixdropExtractor:
             r'https?://[^\"\']+\.mp4[^\"\']*'  # Direct MP4 URL pattern
         ]
 
-        session = await self._get_session(url)
+        retries = 3
+        initial_delay = 2
         
-        try:
-            final_url = await eval_solver(session, url, headers, patterns)
-            
-            if not final_url or len(final_url) < 10:
-                raise ExtractorError(f"Extracted URL appears invalid: {final_url}")
-            
-            logger.info(f"Successfully extracted Mixdrop URL: {final_url[:50]}...")
-            
-            res_headers = self.base_headers.copy()
-            res_headers["Referer"] = url
-            return {
-                "destination_url": final_url,
-                "request_headers": res_headers,
-                "mediaflow_endpoint": self.mediaflow_endpoint,
-            }
-        except Exception as e:
-            raise ExtractorError(f"Mixdrop extraction failed: {str(e)}") from e
+        for attempt in range(retries):
+            try:
+                session = await self._get_session(url)
+                logger.info("Mixdrop: Attempt %s/%s for URL: %s", attempt + 1, retries, url)
+                
+                final_url = await eval_solver(session, url, headers, patterns)
+                
+                if not final_url or len(final_url) < 10:
+                    raise ExtractorError(f"Extracted URL appears invalid: {final_url}")
+                
+                logger.info(f"Successfully extracted Mixdrop URL: {final_url[:50]}...")
+                
+                res_headers = self.base_headers.copy()
+                res_headers["Referer"] = url
+                return {
+                    "destination_url": final_url,
+                    "request_headers": res_headers,
+                    "mediaflow_endpoint": self.mediaflow_endpoint,
+                    "selected_proxy": self.last_used_proxy
+                }
+
+            except (
+                aiohttp.ClientConnectionError,
+                aiohttp.ServerDisconnectedError,
+                aiohttp.ClientPayloadError,
+                asyncio.TimeoutError,
+                OSError,
+                ConnectionResetError,
+                AioProxyError,
+                PyProxyError,
+                UnpackingError
+            ) as e:
+                # Se è un errore di video non trovato (UnpackingError specifico), non riprovare
+                if isinstance(e, UnpackingError) and "not found" in str(e).lower():
+                    raise ExtractorError(f"Mixdrop content not found: {str(e)}")
+
+                is_proxy_err = isinstance(e, (AioProxyError, PyProxyError)) or (
+                    isinstance(e, UnpackingError) and isinstance(getattr(e, "__cause__", None), (AioProxyError, PyProxyError))
+                )
+                is_timeout = isinstance(e, asyncio.TimeoutError) or (
+                    isinstance(e, UnpackingError) and isinstance(getattr(e, "__cause__", None), asyncio.TimeoutError)
+                )
+                err_type = "Proxy" if is_proxy_err else ("Timeout" if is_timeout else "Connection")
+                
+                logger.warning(
+                    "Mixdrop: %s error attempt %s for %s: %s", err_type, attempt + 1, url, str(e)
+                )
+
+                # Reset session
+                if self.session and not self.session.closed:
+                    try:
+                        await self.session.close()
+                    except Exception:
+                        pass
+                self.session = None
+                
+                if is_proxy_err and SELECTED_PROXY_CONTEXT.get():
+                    logger.info("Mixdrop: Clearing sticky proxy context due to ProxyError")
+                    SELECTED_PROXY_CONTEXT.set(None)
+
+                # Try free proxy fallback if primary fails with proxy/timeout error on first attempt
+                if (is_proxy_err or is_timeout) and attempt == 0:
+                    logger.info("Mixdrop: primary connection failed with %s, trying free proxy fallback", err_type)
+                    fallback_url = await self._try_free_proxy_fallback(url, headers)
+                    if fallback_url:
+                        res_headers = self.base_headers.copy()
+                        res_headers["Referer"] = url
+                        return {
+                            "destination_url": fallback_url,
+                            "request_headers": res_headers,
+                            "mediaflow_endpoint": self.mediaflow_endpoint,
+                            "selected_proxy": self.last_used_proxy
+                        }
+
+                if attempt < retries - 1:
+                    delay = initial_delay * (2**attempt)
+                    logger.info("Mixdrop: Waiting %s seconds before next attempt...", delay)
+                    await asyncio.sleep(delay)
+                else:
+                    raise ExtractorError(f"Mixdrop: All {retries} attempts failed for {url}: {str(e)}")
+
+            except Exception as e:
+                logger.error("Mixdrop: Unexpected error attempt %s: %s", attempt + 1, str(e))
+                if attempt == retries - 1:
+                    raise ExtractorError(f"Mixdrop: Final error for {url}: {str(e)}")
+                await asyncio.sleep(initial_delay)
 
     async def _solve_redirector(self, url: str) -> str:
         """Solves safego.cc or clicka.cc redirectors using FS sessions."""
