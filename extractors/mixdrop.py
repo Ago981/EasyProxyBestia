@@ -245,72 +245,75 @@ class MixdropExtractor:
                 url.replace("mixdrop.co", "mixdrop.ag"),
             ]
             
-            async def try_mirror(mirror_url):
+            async def solve_url(current_url, depth=0):
+                if depth > 3: return None
                 try:
-                    m_headers = self._step_headers(ua, mirror_url)
-                    # Try direct/proxy and FlareSolverr in parallel for each mirror
-                    pref_p = get_proxy_for_url(mirror_url, TRANSPORT_ROUTES, self.proxies, self.bypass_warp_active)
+                    m_headers = self._step_headers(ua, current_url)
+                    pref_p = get_proxy_for_url(current_url, TRANSPORT_ROUTES, self.proxies, self.bypass_warp_active)
                     
                     async def fetch_direct():
                         try:
                             connector = get_connector_for_proxy(pref_p) if pref_p else TCPConnector(ssl=False)
                             async with ClientSession(connector=connector, headers=self.base_headers) as local_session:
-                                async with local_session.get(mirror_url, cookies=cookies, headers=m_headers, timeout=10) as r:
+                                async with local_session.get(current_url, cookies=cookies, headers=m_headers, timeout=10) as r:
                                     if r.status == 200:
                                         t = await r.text()
                                         if not any(m in t.lower() for m in ["cf-challenge", "robot", "checking your browser"]):
-                                            return t, mirror_url, ua, {}
+                                            return t, str(r.url), ua, {}
                         except: pass
                         return None
 
                     async def fetch_fs():
                         try:
-                            res = await self._request_flaresolverr("request.get", mirror_url, session_id=session_id, wait=0)
+                            res = await self._request_flaresolverr("request.get", current_url, session_id=session_id, wait=0)
                             sol = res.get("solution", {})
-                            return sol.get("response", ""), sol.get("url", mirror_url), sol.get("userAgent", ua), {c["name"]: c["value"] for c in sol.get("cookies", [])}
+                            return sol.get("response", ""), sol.get("url", current_url), sol.get("userAgent", ua), {c["name"]: c["value"] for c in sol.get("cookies", [])}
                         except: pass
                         return None
 
                     tasks = [asyncio.create_task(fetch_direct()), asyncio.create_task(fetch_fs())]
                     for t in asyncio.as_completed(tasks):
                         res = await t
-                        if res and res[0]: return res
+                        if res and res[0]:
+                            html, final_url, ua_res, new_cookies = res
+                            cookies.update(new_cookies)
+                            
+                            # Unpack JS
+                            if "eval(function(p,a,c,k,e,d)" in html:
+                                for block in re.findall(r'eval\(function\(p,a,c,k,e,d\).*?\}\(.*\)\)', html, re.S):
+                                    html += "\n" + self._unpack(block)
+
+                            # Find video patterns
+                            patterns = [
+                                r'(?:MDCore|vsConfig)\.wurl\s*=\s*["\']([^"\']+)["\']', 
+                                r'source\s*src\s*=\s*["\']([^"\']+)["\']', 
+                                r'file:\s*["\']([^"\']+)["\']', 
+                                r'["\'](https?://[^\s"\']+\.(?:mp4|m3u8)[^\s"\']*)["\']',
+                                r'wurl\s*:\s*["\']([^"\']+)["\']'
+                            ]
+                            for p in patterns:
+                                match = re.search(p, html)
+                                if match:
+                                    v_url = match.group(1)
+                                    if v_url.startswith("//"): v_url = "https:" + v_url
+                                    return self._build_result(v_url, final_url, ua_res, cookies=cookies)
+
+                            # Check for iframes
+                            soup = BeautifulSoup(html, "lxml")
+                            iframe = soup.find("iframe", src=re.compile(r'/e/|/emb', re.I))
+                            if iframe:
+                                iframe_url = urljoin(final_url, iframe["src"])
+                                return await solve_url(iframe_url, depth + 1)
                 except: pass
                 return None
 
             # Test all mirrors in parallel
-            mirror_tasks = [asyncio.create_task(try_mirror(m)) for m in mirrors]
+            mirror_tasks = [asyncio.create_task(solve_url(m)) for m in mirrors]
             for mt in asyncio.as_completed(mirror_tasks):
-                res = await mt
-                if res:
-                    html, current_url, ua_res, new_cookies = res
-                    cookies.update(new_cookies)
-                    headers = self._step_headers(ua_res, current_url)
-                    
-                    if "eval(function(p,a,c,k,e,d)" in html:
-                        for block in re.findall(r'eval\(function\(p,a,c,k,e,d\).*?\}\(.*\)\)', html, re.S):
-                            html += "\n" + self._unpack(block)
-
-                    patterns = [
-                        r'(?:MDCore|vsConfig)\.wurl\s*=\s*["\']([^"\']+)["\']', 
-                        r'source\s*src\s*=\s*["\']([^"\']+)["\']', 
-                        r'file:\s*["\']([^"\']+)["\']', 
-                        r'["\'](https?://[^\s"\']+\.(?:mp4|m3u8)[^\s"\']*)["\']',
-                        r'wurl\s*:\s*["\']([^"\']+)["\']'
-                    ]
-                    for p in patterns:
-                        match = re.search(p, html)
-                        if match:
-                            v_url = match.group(1)
-                            if v_url.startswith("//"): v_url = "https:" + v_url
-                            result = self._build_result(v_url, current_url, ua_res, cookies=cookies)
-                            MixdropExtractor._result_cache[cache_key] = (result, time.time())
-                            return result
-
-                    soup = BeautifulSoup(html, "lxml")
-                    iframe = soup.find("iframe", src=re.compile(r'/e/|/emb', re.I))
-                    if iframe:
-                        pass
+                result = await mt
+                if result:
+                    MixdropExtractor._result_cache[cache_key] = (result, time.time())
+                    return result
 
             raise ExtractorError("Mixdrop: Video source not found")
         finally:
