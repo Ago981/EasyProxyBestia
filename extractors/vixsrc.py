@@ -185,29 +185,58 @@ class VixSrcExtractor:
         return data
 
     async def _fetch_via_flaresolverr(self, url: str, headers: dict = None) -> "MockResponse":
-        """Fallback: use FlareSolverr to bypass Cloudflare/JS challenges."""
+        """Use FlareSolverr to get cf_clearance cookie, then re-fetch with curl_cffi for raw HTML."""
         logger.info("FlareSolverr fallback for %s", url)
         result = await self._request_flaresolverr("request.get", url, headers=headers)
         solution = result.get("solution", {})
         html = solution.get("response", "")
+
+        # Build Cookie string from FlareSolverr cookies
+        fs_cookies = solution.get("cookies", [])
+        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in fs_cookies if c.get("name") and c.get("value"))
+
+        def _make_resp(text_content, status_code):
+            class _Mock:
+                def __init__(self_, t, s, u):
+                    self_._text = t; self_.status = s; self_.status_code = s
+                    self_.text = t; self_.url = u; self_.headers = {}
+                async def text_async(self_): return self_._text
+                def raise_for_status(self_):
+                    if self_.status >= 400:
+                        raise ExtractorError(f"HTTP error {self_.status} for {self_.url}")
+            return _Mock(text_content, status_code, url)
+
+        # If the HTML already has the tokens, use it directly (fast path)
+        if html and ("window.masterPlaylist" in html or "'token':" in html or '"token":' in html):
+            return _make_resp(html, 200)
+
+        # fallback: curl_cffi with FlareSolverr cookies to get raw server HTML
+        logger.info("FlareSolverr HTML missing tokens, re-fetching with cookies via curl_cffi")
+        from curl_cffi.requests import AsyncSession as CurlAsyncSession
+
+        final_headers = self._fresh_headers(**(headers or {}))
+        final_headers.pop("User-Agent", None)
+        final_headers.pop("user-agent", None)
+        if cookie_str:
+            final_headers["Cookie"] = cookie_str
+
+        async with CurlAsyncSession(impersonate="chrome131") as session:
+            resp = await session.get(url, headers=final_headers, timeout=30, allow_redirects=True)
+            content = resp.text
+            status = resp.status_code
+
+        logger.info("curl_cffi (with FS cookies) status=%s len=%s for %s", status, len(content) if content else 0, url)
+
+        if status == 200 and content:
+            return _make_resp(content, 200)
+
+        if status == 403 and html:
+            logger.warning("curl_cffi with FS cookies also got 403, using FlareSolverr HTML as fallback")
+            return _make_resp(html, 200)
+
         if not html:
-            raise ExtractorError("FlareSolverr returned empty response")
-
-        class MockResponse:
-            def __init__(self_, text_content, status, response_url):
-                self_._text = text_content
-                self_.status = status
-                self_.status_code = status
-                self_.text = text_content
-                self_.url = response_url
-                self_.headers = {}
-            async def text_async(self_):
-                return self_._text
-            def raise_for_status(self_):
-                if self_.status >= 400:
-                    raise ExtractorError(f"HTTP error {self_.status} for {self_.url}")
-
-        return MockResponse(html, 200, url)
+            raise ExtractorError(f"FlareSolverr fallback failed: curl_cffi HTTP {status}, FS empty")
+        return _make_resp(html, 200)
 
     @staticmethod
     def _normalize_base_site(url: str) -> str:
