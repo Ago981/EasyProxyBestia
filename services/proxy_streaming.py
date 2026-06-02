@@ -105,7 +105,12 @@ class HLSProxyStreamingMixin:
                     disable_ssl = get_ssl_setting_for_url(segment_url, TRANSPORT_ROUTES) or is_vavoo_req
                     # ✅ Use yarl.URL with encoded=True to prevent double-encoding of commas
                     final_segment_url = yarl.URL(segment_url, encoded=True)
-                    resp_ctx = session.get(final_segment_url, headers=headers, ssl=not disable_ssl)
+                    resp_ctx = session.get(
+                        final_segment_url,
+                        headers=headers,
+                        ssl=not disable_ssl,
+                        timeout=ClientTimeout(total=6, connect=3, sock_connect=3, sock_read=4),
+                    )
                     resp = await resp_ctx.__aenter__()
                     break
                 except (ClientConnectionError, AioProxyError, PyProxyError, asyncio.TimeoutError, OSError) as e:
@@ -346,6 +351,8 @@ class HLSProxyStreamingMixin:
                 is_special_cdn,
                 HAS_CURL_CFFI,
             )
+            is_hls_segment_request = request.path.startswith("/proxy/hls/segment.")
+            segment_timeout = ClientTimeout(total=6, connect=3, sock_connect=3, sock_read=4)
 
             if use_curl_cffi:
                 logger.info(f"🚀 [curl_cffi] Using browser impersonation for: {stream_url}")
@@ -418,7 +425,12 @@ class HLSProxyStreamingMixin:
                     request_target = urllib.parse.unquote(stream_url)
                 else:
                     request_target = yarl.URL(stream_url, encoded=True)
-                resp_ctx = session.get(request_target, headers=headers, ssl=not disable_ssl)
+                resp_ctx = session.get(
+                    request_target,
+                    headers=headers,
+                    ssl=not disable_ssl,
+                    timeout=segment_timeout if is_hls_segment_request else None,
+                )
 
             async def retry_hls_segment_with_fresh_token():
                 if not request.path.startswith("/proxy/hls/segment."):
@@ -457,6 +469,7 @@ class HLSProxyStreamingMixin:
                         yarl.URL(refreshed_url, encoded=True),
                         headers=headers,
                         ssl=not retry_disable_ssl,
+                        timeout=segment_timeout,
                     ) as retry_resp:
                         if retry_resp.status not in [200, 206]:
                             retry_routing = (
@@ -540,7 +553,7 @@ class HLSProxyStreamingMixin:
                 # 1) Direct retry of same URL via new proxy
                 try:
                     rot_target = yarl.URL(stream_url, encoded=True) if not is_special_cdn else urllib.parse.unquote(stream_url)
-                    async with rot_session.get(rot_target, headers=headers, ssl=not disable_ssl) as rot_resp:
+                    async with rot_session.get(rot_target, headers=headers, ssl=not disable_ssl, timeout=segment_timeout) as rot_resp:
                         if rot_resp.status in [200, 206]:
                             logger.info("Proxy rotation successful (direct): %s -> %s", old_proxy, rot_proxy or "direct")
                             rot_body = await rot_resp.read()
@@ -564,7 +577,7 @@ class HLSProxyStreamingMixin:
                             for _ in range(2):
                                 try:
                                     fr_target = yarl.URL(fresh_url, encoded=True)
-                                    async with rot_session.get(fr_target, headers=headers, ssl=not disable_ssl) as fr_resp:
+                                    async with rot_session.get(fr_target, headers=headers, ssl=not disable_ssl, timeout=segment_timeout) as fr_resp:
                                         if fr_resp.status in [200, 206]:
                                             logger.info("Proxy rotation successful (re-extract): %s -> %s", old_proxy, rot_proxy or "direct")
                                             fr_body = await fr_resp.read()
@@ -584,7 +597,7 @@ class HLSProxyStreamingMixin:
                 for attempt in range(2):
                     await asyncio.sleep(0.15 * (attempt + 1))
                     try:
-                        async with session.get(retry_target, headers=headers, ssl=not disable_ssl) as retry_resp:
+                        async with session.get(retry_target, headers=headers, ssl=not disable_ssl, timeout=segment_timeout) as retry_resp:
                             if retry_resp.status not in [200, 206]:
                                 logger.debug(
                                     "Segment payload retry got status %s for %s",
