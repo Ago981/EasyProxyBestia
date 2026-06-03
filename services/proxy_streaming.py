@@ -754,6 +754,11 @@ class HLSProxyStreamingMixin:
                 try:
                     content_bytes = await resp.read()
                 except (ClientPayloadError, ConnectionResetError, OSError) as e:
+                    # Invalida la sessione nel pool prima del retry
+                    if session_proxy and session_proxy in self.proxy_sessions:
+                        stale = self.proxy_sessions.pop(session_proxy, None)
+                        if stale and not stale.closed:
+                            await stale.close()
                     retry_result = await retry_same_segment_after_payload_error(e)
                     if not retry_result:
                         raise
@@ -1020,6 +1025,11 @@ class HLSProxyStreamingMixin:
                     "Stream interrupted while using proxy %s (payload/reset): %r.",
                     active_proxy, e
                 )
+            # Invalida la sessione nel pool per evitare che i retry successivi riusino una connessione rotta
+            if session_proxy and session_proxy in self.proxy_sessions:
+                stale = self.proxy_sessions.pop(session_proxy, None)
+                if stale and not stale.closed:
+                    await stale.close()
             warp_retry_response = await retry_direct_after_warp(e)
             if warp_retry_response:
                 return warp_retry_response
@@ -1042,6 +1052,11 @@ class HLSProxyStreamingMixin:
                     active_proxy,
                     extractor_key=request.query.get("extractor_key"),
                 )
+            # Invalida la sessione nel pool per evitare che i retry successivi riusino una connessione rotta
+            if session_proxy and session_proxy in self.proxy_sessions:
+                stale = self.proxy_sessions.pop(session_proxy, None)
+                if stale and not stale.closed:
+                    await stale.close()
             warp_retry_response = await retry_direct_after_warp(e)
             if warp_retry_response:
                 return warp_retry_response
