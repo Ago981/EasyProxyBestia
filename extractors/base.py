@@ -118,9 +118,10 @@ class BaseExtractor:
                 
                 # Reset session
                 async with self._session_lock:
-                    if self.session and not self.session.closed:
-                        await self.session.close()
-                    self.session = None
+                    if session and not session.closed:
+                        await session.close()
+                    if self.session is session:
+                        self.session = None
                 
                 if is_proxy_err and SELECTED_PROXY_CONTEXT.get() and not STRICT_PROXY_CONTEXT.get():
                     proxy_to_mark = SELECTED_PROXY_CONTEXT.get()
