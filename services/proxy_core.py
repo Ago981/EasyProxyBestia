@@ -52,6 +52,7 @@ class HLSProxyCoreMixin:
 
     async def start_tasks(self):
         """Starts background tasks for the proxy."""
+        self._last_warp_reconnect_time = time.time()  # ponytail: startup cooldown to allow initial handshake
         asyncio.create_task(self._update_latest_version())
         asyncio.create_task(self._cleanup_stale_sessions())
         asyncio.create_task(self._warp_keepalive())
@@ -136,15 +137,24 @@ class HLSProxyCoreMixin:
         if not hasattr(self, "_warp_reconnect_lock"):
             self._warp_reconnect_lock = asyncio.Lock()
 
+        now = time.time()
+        last_reconnect = getattr(self, "_last_warp_reconnect_time", 0)
+        if now - last_reconnect < 60:
+            logger.warning("WARP reconnected recently (cooldown active: %.1fs remaining). Skipping reconnect.", 60 - (now - last_reconnect))
+            return {"status": "ok", "message": "Cooldown active"}
+
         if self._warp_reconnect_lock.locked():
             logger.warning("WARP reconnect already in progress. Skipping redundant request.")
             return {"status": "ok", "message": "Reconnect already in progress"}
 
         async with self._warp_reconnect_lock:
+            self._last_warp_reconnect_time = time.time()
+            logger.info("🔄 Starting WARP reconnection...")
             result = {"status": "ok", "message": ""}
 
             if await _warp_cli_connect():
                 result["message"] = "WARP reconnected via warp-cli"
+                logger.info("✅ %s", result["message"])
                 return result
 
             # Fallback: wireproxy mode — kill, re-register, restart
@@ -208,14 +218,17 @@ class HLSProxyCoreMixin:
                         s = socket.create_connection(("127.0.0.1", 1080), timeout=2)
                         s.close()
                         result["message"] = "WARP reconnected via wireproxy (new IP)"
+                        logger.info("✅ %s", result["message"])
                         return result
                     except (OSError, ConnectionRefusedError):
                         await asyncio.sleep(1)
                 result["status"] = "error"
                 result["message"] = "wireproxy started but SOCKS5 not detected on 1080"
+                logger.error("❌ %s", result["message"])
             except Exception as e:
                 result["status"] = "error"
                 result["message"] = f"WARP reconnect failed: {e}"
+                logger.error("❌ %s", result["message"])
 
             return result
 
