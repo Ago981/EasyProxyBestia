@@ -96,7 +96,7 @@ def create_app():
     # ✅ NUOVO: Route per licenze DRM (GET e POST)
     app.router.add_get('/license', proxy.handle_license_request)
     app.router.add_post('/license', proxy.handle_license_request)
-    
+
     # ✅ NUOVO: Endpoint per generazione URL (compatibilità MFP)
     app.router.add_post('/generate_urls', proxy.handle_generate_urls)
 
