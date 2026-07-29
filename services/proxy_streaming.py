@@ -75,7 +75,7 @@ class HLSProxyStreamingMixin:
     async def handle_ts_segment(self, request):
         """Gestisce richieste per segmenti .ts"""
         try:
-            segment_name = request.match_info.get("segment")
+            segment_name = request.match_info.get("tail")
             base_url = request.query.get("base_url")
 
             if not base_url:

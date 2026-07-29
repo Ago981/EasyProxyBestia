@@ -89,7 +89,7 @@ def create_app():
     app.router.add_get('/proxy/hls/segment.vtt', proxy.handle_proxy_request)
     
     app.router.add_get('/playlist', proxy.handle_playlist_request)
-    app.router.add_get('/segment/{segment}', proxy.handle_ts_segment)
+    app.router.add_get('/segment/{tail:.*}', proxy.handle_ts_segment)
     app.router.add_get('/decrypt/segment.mp4', proxy.handle_decrypt_segment)  # ClearKey decryption for legacy mode
     app.router.add_get('/decrypt/segment.ts', proxy.handle_decrypt_segment)   # TS variant for legacy mode
     
