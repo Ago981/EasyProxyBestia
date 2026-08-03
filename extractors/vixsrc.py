@@ -59,7 +59,7 @@ class VixSrcExtractor:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(VIXSRC_CONFIG_URL) as response:
                     response.raise_for_status()
-                    config = await response.json()
+                    config = await response.json(content_type=None)
             domain = str(config.get("vixsrc", "")).strip().lower()
             if domain:
                 _vixsrc_domain = domain.removeprefix("https://").removeprefix("http://").rstrip("/")
