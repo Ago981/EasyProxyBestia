@@ -77,10 +77,8 @@ proot-distro login "$DISTRO_NAME" -- bash -s <<'UBUNTU_SETUP'
     sed -i "s|archive.ubuntu.com|mirrors.kernel.org|g" /etc/apt/sources.list || true
     sed -i "s|security.ubuntu.com|mirrors.kernel.org|g" /etc/apt/sources.list || true
 
-    echo "[INFO] Inside Ubuntu: Adding non-snap Chromium PPA..."
     apt-get update -y
     apt-get install -y software-properties-common
-    add-apt-repository -y ppa:xtradeb/apps
 
     echo "[INFO] Inside Ubuntu: Updating packages..."
     apt-get update -y
@@ -95,11 +93,9 @@ proot-distro login "$DISTRO_NAME" -- bash -s <<'UBUNTU_SETUP'
         python3 python3-venv python-is-python3 python3-pip git curl wget \
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
         libxdamage1 libxfixes3 libxrandr2 libgbm1 "$ASOUND_PACKAGE" libpango-1.0-0 libcairo2 \
-        libatspi2.0-0 fonts-liberation ca-certificates chromium chromium-driver nodejs procps \
+        libatspi2.0-0 fonts-liberation ca-certificates nodejs procps \
         libxshmfence1 libglu1-mesa libx11-xcb1 libxcb-dri3-0 libxss1 libxtst6 libxslt1.1
 
-    command -v chromium >/dev/null 2>&1
-    command -v chromedriver >/dev/null 2>&1
     command -v node >/dev/null 2>&1
 
     EP_DIR="/root/EasyProxy"
@@ -126,24 +122,6 @@ proot-distro login "$DISTRO_NAME" -- bash -s <<'UBUNTU_SETUP'
 
     echo "[INFO] Installing EasyProxy requirements..."
     cd "$EP_DIR"
-    "$VENV_PYTHON" -m pip install --no-cache-dir -r requirements.txt
-
-    echo "[INFO] Playwright will use system Chromium (/usr/bin/chromium)..."
-    # No need to install playwright chromium, saves ~500MB
-
-    echo "[INFO] Setting up FlareSolverr..."
-    if [ ! -d "$EP_DIR/flaresolverr/.git" ]; then
-        if [ -e "$EP_DIR/flaresolverr" ]; then
-            echo "[FATAL] $EP_DIR/flaresolverr exists but is not a Git checkout." >&2
-            exit 1
-        fi
-        git clone https://github.com/FlareSolverr/FlareSolverr.git "$EP_DIR/flaresolverr"
-    fi
-    cd "$EP_DIR/flaresolverr"
-    git checkout -- src/utils.py 2>/dev/null || true
-    sed -i "s|options.add_argument('--no-sandbox')|options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage'); options.add_argument('--disable-gpu'); options.add_argument('--headless=new')|" src/utils.py
-    sed -i "s|^\([[:space:]]*\)start_xvfb_display()|\1pass|g" src/utils.py 2>/dev/null || true
-    sed -i "s|driver_executable_path=driver_exe_path|driver_executable_path=\"/usr/bin/chromedriver\"|" src/utils.py 2>/dev/null || true
     "$VENV_PYTHON" -m pip install --no-cache-dir -r requirements.txt
 
     echo "[INFO] Installing critical dependencies..."
@@ -204,15 +182,6 @@ echo "=================================================="
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] EasyProxy bootstrap"
 echo "=================================================="
 
-if [ -f "/usr/bin/chromium" ]; then
-    export CHROME_BIN="/usr/bin/chromium"
-elif [ -f "/usr/bin/chromium-browser" ]; then
-    export CHROME_BIN="/usr/bin/chromium-browser"
-fi
-
-export CHROME_EXE_PATH="${CHROME_BIN:-}"
-export CHROME_DRIVER_PATH="/usr/bin/chromedriver"
-export FLARESOLVERR_URL=http://localhost:8191
 export ENABLE_WARP="${ENABLE_WARP:-false}"
 
 if [ ! -d "$EP_DIR" ]; then
@@ -253,11 +222,7 @@ echo "EasyProxy Full - Termux Edition"
 echo "Port: $PORT | Mode: Headless"
 echo "Python: $("$VENV_PYTHON" --version 2>/dev/null || echo missing)"
 echo "Pip: $("$VENV_PYTHON" -m pip --version 2>/dev/null || echo missing)"
-echo "Chromium: ${CHROME_BIN:-missing}"
-echo "Chromedriver: $(command -v chromedriver 2>/dev/null || echo missing)"
 echo ""
-
-echo "FlareSolverr starts on-demand via Python code"
 
 echo "Starting EasyProxy on port $PORT..."
 "$VENV_PYTHON" app.py &
@@ -373,8 +338,7 @@ if [ -r "$PID_FILE" ]; then
 fi
 
 # Compatibility cleanup for processes started by older EasyProxy launchers.
-pkill -TERM -f 'python3.*(app|flaresolverr|easyproxy_start)' 2>/dev/null || true
-pkill -TERM -f 'node.*flaresolverr' 2>/dev/null || true
+pkill -TERM -f 'python3.*(app|easyproxy_start)' 2>/dev/null || true
 pkill -TERM Xvfb 2>/dev/null || true
 GUEST_STOP
     echo "Warning: could not stop guest processes through proot-distro login." >&2
@@ -435,5 +399,4 @@ echo -e "           proot-distro login ubuntu"
 echo -e "           nano /root/EasyProxy/.env"
 echo ""
 echo -e "  ${YELLOW}Access:${NC}  http://localhost:7860"
-echo -e "  ${YELLOW}Note:${NC}   First start may take ~30s (Chromium init)"
 echo ""

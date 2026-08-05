@@ -47,7 +47,6 @@ The easiest way to get EasyProxy plus solvers on Windows:
 1. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
-   python -m playwright install chromium
    ```
 2. **Start EasyProxy**:
    ```bash
