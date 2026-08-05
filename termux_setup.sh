@@ -95,11 +95,12 @@ proot-distro login "$DISTRO_NAME" -- bash -s <<'UBUNTU_SETUP'
         python3 python3-venv python-is-python3 python3-pip git curl wget \
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
         libxdamage1 libxfixes3 libxrandr2 libgbm1 "$ASOUND_PACKAGE" libpango-1.0-0 libcairo2 \
-        libatspi2.0-0 fonts-liberation ca-certificates chromium chromium-driver procps \
+        libatspi2.0-0 fonts-liberation ca-certificates chromium chromium-driver nodejs procps \
         libxshmfence1 libglu1-mesa libx11-xcb1 libxcb-dri3-0 libxss1 libxtst6 libxslt1.1
 
     command -v chromium >/dev/null 2>&1
     command -v chromedriver >/dev/null 2>&1
+    command -v node >/dev/null 2>&1
 
     EP_DIR="/root/EasyProxy"
     EP_REPO="https://github.com/realbestia1/EasyProxy.git"
@@ -374,7 +375,6 @@ fi
 # Compatibility cleanup for processes started by older EasyProxy launchers.
 pkill -TERM -f 'python3.*(app|flaresolverr|easyproxy_start)' 2>/dev/null || true
 pkill -TERM -f 'node.*flaresolverr' 2>/dev/null || true
-pkill -TERM -f gunicorn 2>/dev/null || true
 pkill -TERM Xvfb 2>/dev/null || true
 GUEST_STOP
     echo "Warning: could not stop guest processes through proot-distro login." >&2
