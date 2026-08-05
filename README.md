@@ -76,6 +76,14 @@ For Termux, full functionality requires a 64-bit Android device. On 32-bit devic
     - `easyproxy-stop`: Stop all services.
     - `easyproxy-logs`: Attach to the running session or show the saved logs.
 
+If `easyproxy-update` reports `CANNOT LINK EXECUTABLE "curl"`, repair the
+partially upgraded Termux packages first, then retry the update:
+
+```bash
+apt update && apt full-upgrade -y
+easyproxy-update
+```
+
 *Access the dashboard at `http://localhost:7860`*
 
 ---

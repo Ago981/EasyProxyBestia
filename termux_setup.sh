@@ -41,7 +41,11 @@ echo ""
 
 info "Phase 1/5: Installing Termux packages..."
 termux-setup-storage 2>/dev/null || true
-pkg update -y
+# Termux is rolling-release and does not support partial upgrades.  Keep the
+# complete native environment aligned before installing individual packages;
+# otherwise curl and its OpenSSL/ngtcp2 libraries can end up ABI-incompatible.
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
 pkg install -y proot-distro git curl pulseaudio wget screen
 log "Termux packages installed."
 
@@ -315,8 +319,32 @@ cat > "$PREFIX/bin/easyproxy-update" << 'UPD_EOF'
 set -Eeuo pipefail
 echo "Running full EasyProxy system update..."
 easyproxy-stop 2>/dev/null || true
-curl -fsSL --retry 3 --connect-timeout 20 \
-    "https://raw.githubusercontent.com/realbestia1/EasyProxy/main/termux_setup.sh?$(date +%s)" | bash
+
+echo "Updating Termux packages..."
+# Use apt-get directly: the pkg wrapper depends on curl and cannot repair a
+# partially upgraded Termux installation when curl itself no longer starts.
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
+
+SETUP_URL="https://raw.githubusercontent.com/realbestia1/EasyProxy/main/termux_setup.sh?$(date +%s)"
+SETUP_SCRIPT="$(mktemp)"
+cleanup() {
+    rm -f -- "$SETUP_SCRIPT"
+}
+trap cleanup EXIT
+
+if command -v curl >/dev/null 2>&1 && \
+        curl -fsSL --retry 3 --connect-timeout 20 -o "$SETUP_SCRIPT" "$SETUP_URL"; then
+    :
+elif command -v wget >/dev/null 2>&1 && \
+        wget -q --tries=3 --timeout=20 -O "$SETUP_SCRIPT" "$SETUP_URL"; then
+    :
+else
+    echo "Unable to download the EasyProxy setup script with curl or wget." >&2
+    exit 1
+fi
+
+bash "$SETUP_SCRIPT"
 echo "EasyProxy system updated successfully!"
 easyproxy
 UPD_EOF
