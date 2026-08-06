@@ -266,7 +266,10 @@ class HLSProxyExtractorHandlerMixin:
             )
 
             # Costruisci l'URL del proxy per questo stream
-            scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+            scheme = request.headers.get("X-Forwarded-Proto")
+            if not scheme:
+                cf_visitor = request.headers.get("CF-Visitor", "")
+                scheme = "https" if '"scheme":"https"' in cf_visitor else request.scheme
             host = request.headers.get("X-Forwarded-Host", request.host)
             proxy_base = f"{scheme}://{host}"
 
