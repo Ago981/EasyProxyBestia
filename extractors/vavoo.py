@@ -218,7 +218,6 @@ class VavooExtractor:
         if m:
             url = f"https://vavoo.to/vavoo-iptv/play/{m.group(1)}"
 
-        session = await self._get_session()
         for attempt in range(2):
             if attempt > 0:
                 sig = await self._get_sig(force=True)
@@ -228,6 +227,9 @@ class VavooExtractor:
                 sig = await self._get_sig()
                 if not sig:
                     logger.warning("Vavoo no addonSig available, resolving without signature")
+
+            # _get_sig() may rebuild session when proxy bypass is active.
+            session = await self._get_session()
 
             headers = {
                 "Origin": "https://vavoo.to",
