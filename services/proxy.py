@@ -1,5 +1,4 @@
 from services.proxy_shared import PlaylistBuilder, logger
-import asyncio
 import os
 from services.proxy_core import HLSProxyCoreMixin
 from services.proxy_dash import HLSProxyDashMixin
@@ -33,11 +32,7 @@ class HLSProxy(
         else:
             self.playlist_builder = None
 
-        # Background segment prefetch tasks and bounded in-memory results.
-        self.prefetch_tasks = set()
         self._background_tasks = set()
-        self._prefetch_semaphore = asyncio.Semaphore(5)
-        self._prefetch_lock = asyncio.Lock()
         self._parallel_fetch_stats = {
             "calls": 0,
             "active": 0,
@@ -54,12 +49,6 @@ class HLSProxy(
             "last_duration_ms": 0.0,
             "last_segment": None,
         }
-
-        # Short in-memory cache for generated live HLS media playlists.
-        # Entries expire quickly and are never persisted to disk.
-        self._hls_playlist_cache = {}
-        self._segment_next_urls = {}
-        self._segment_prefetch_cache = {}
 
         # Sessione condivisa per il proxy (no proxy)
         self.session = None
