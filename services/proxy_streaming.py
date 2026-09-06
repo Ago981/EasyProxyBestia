@@ -760,8 +760,12 @@ class HLSProxyStreamingMixin:
                 )
                 curl_s = None
                 try:
+                    curl_options = _config.get_curl_ipv4_options(session_proxy).get("curl_options")
+                    curl_kwargs = {"impersonate": "chrome124"}
+                    if curl_options:
+                        curl_kwargs["curl_options"] = curl_options
                     curl_s = get_curl_async_session()(
-                        impersonate="chrome124",
+                        **curl_kwargs,
                     )
                     curl_headers = prepare_curl_headers(stream_url, headers)
 
