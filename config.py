@@ -784,10 +784,12 @@ def get_connector_for_proxy(proxy_url: str, **kwargs):
     # avoidable timeouts/buffering. The caller still controls pool limits and
     # idle cleanup.
     if is_warp:
-        # WARP's WireGuard transport may stay dual-stack, but media requests
-        # must resolve upstream destinations over IPv4. This avoids broken or
-        # intermittently-routed VPS IPv6 paths while preserving the SOCKS route.
-        force_ipv4 = True
+        # Keep the original hostname in the SOCKS request so TLS preserves
+        # SNI/certificate validation. wireproxy itself is IPv4-only, so its
+        # remote resolver selects the IPv4 path without replacing the host
+        # with a bare address before TLS.
+        force_ipv4 = False
+        rdns = True
         kwargs.setdefault("keepalive_timeout", 15)
         kwargs.setdefault("force_close", False)
 
