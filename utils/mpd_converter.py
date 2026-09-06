@@ -247,11 +247,37 @@ class MPDToHLSConverter:
                 lines[1] = '#EXT-X-VERSION:6'
 
             # --- GESTIONE VIDEO (EXT-X-STREAM-INF) ---
+            # Live ClearKey MPD: mantieni il comportamento della build stabile.
+            # Esporre tutte le rappresentazioni fa sì che alcuni player iOS
+            # aprano più playlist/init contemporaneamente, aumentando molto
+            # la latenza iniziale e favorendo timeout sul CDN live.
+            # I VOD restano adaptive per non perdere la selezione qualità.
+            live_mpd = root.get('type', 'static').lower() == 'dynamic'
+            max_height = 0
+            if live_mpd:
+                for adaptation_set in video_sets:
+                    for rep in adaptation_set.findall('mpd:Representation', self.ns):
+                        rep_id = rep.get('id', '').lower()
+                        if 'iframe' in rep_id or 'i-frame' in rep_id:
+                            continue
+                        try:
+                            max_height = max(max_height, int(rep.get('height', 0)))
+                        except (TypeError, ValueError):
+                            continue
+
             for adaptation_set in video_sets:
                 for representation in adaptation_set.findall('mpd:Representation', self.ns):
                     rep_id = representation.get('id', '')
                     if 'iframe' in rep_id.lower() or 'i-frame' in rep_id.lower():
                         continue
+                    if live_mpd and max_height:
+                        try:
+                            if int(representation.get('height', 0)) < max_height:
+                                continue
+                        except (TypeError, ValueError):
+                            # Keep representations without height: some live
+                            # manifests provide only bandwidth/codecs.
+                            pass
                     rep_id = representation.get('id')
                     bandwidth = representation.get('bandwidth')
                     width = representation.get('width')
