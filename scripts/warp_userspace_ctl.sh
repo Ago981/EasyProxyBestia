@@ -29,6 +29,17 @@ write_wireproxy_config() {
     sed -E '/^(Address|AllowedIPs|DNS) = / {
         s/, *[^, ]*:[^, ]*//g
     }' "$CONFIG_FILE" > "$WIREPROXY_CONFIG"
+
+    # Resolve the WireGuard endpoint to an IPv4 address as well. This keeps
+    # the control-plane handshake from selecting an IPv6 endpoint implicitly.
+    endpoint=$(sed -n 's/^Endpoint = //p' "$WIREPROXY_CONFIG" | head -n 1)
+    endpoint_host=${endpoint%:*}
+    endpoint_port=${endpoint##*:}
+    endpoint_ipv4=$(getent ahostsv4 "$endpoint_host" 2>/dev/null | awk 'NR == 1 { print $1 }')
+    if [ -n "$endpoint_ipv4" ] && [ -n "$endpoint_port" ]; then
+        sed -i "s/^Endpoint = .*/Endpoint = ${endpoint_ipv4}:${endpoint_port}/" "$WIREPROXY_CONFIG"
+    fi
+
     printf '\n[Socks5]\nBindAddress = %s\n' "$SOCKS_ADDR" >> "$WIREPROXY_CONFIG"
     chmod 600 "$WIREPROXY_CONFIG"
 }
