@@ -633,6 +633,11 @@ class HLSProxyCoreMixin:
                 "enable_cleanup_closed": True,
                 "use_dns_cache": True,
             }
+            # The known-good MPD path used IPv4 for DIRECT connections.
+            # Keep WARP/proxy routes dual-stack; this only avoids broken VPS
+            # IPv6 paths for direct CDN requests.
+            if not prefer_default_family:
+                connector_kwargs["family"] = socket.AF_INET
             connector = TCPConnector(**connector_kwargs)
             session = aiohttp.ClientSession(
                 timeout=ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=30),
