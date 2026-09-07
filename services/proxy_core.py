@@ -801,6 +801,20 @@ class HLSProxyCoreMixin:
         logger.warning("[NET] Invalidated pooled proxy session: %s", proxy_url)
         return True
 
+    async def _invalidate_direct_session(self, url: str | None = None) -> bool:
+        """Detach a stale shared DIRECT connector without changing routing policy."""
+        prefer_default_family = prefer_default_family_for_url(url or "")
+        attr = "flex_session" if prefer_default_family else "session"
+        session = getattr(self, attr, None)
+        if session is None or session.closed:
+            setattr(self, attr, None)
+            return False
+
+        setattr(self, attr, None)
+        retire_session(self, session)
+        logger.warning("[NET] Invalidated pooled DIRECT session: %s", attr)
+        return True
+
     async def _retry_special_cdn_request(self, request_target, headers, disable_ssl: bool):
         """Retry a provider-protected CDN once via an alternate aiohttp route."""
         _ENABLE_WARP = _shared.ENABLE_WARP

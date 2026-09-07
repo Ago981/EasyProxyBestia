@@ -1676,6 +1676,9 @@ class HLSProxyStreamingMixin:
             if segment_proxy:
                 logger.info(f"📡 [Decrypt] Using session via proxy: {segment_proxy}")
 
+            fetch_started_at = time.monotonic()
+            fetch_elapsed = 0.0
+            decrypt_elapsed = 0.0
             try:
                 # Parallel download of init and media segment
                 network_errors = ALL_PROXY_ERRORS + (
@@ -1844,9 +1847,61 @@ class HLSProxyStreamingMixin:
                                 route="WARP",
                             ),
                         )
+                elif not segment_proxy and (init_retryable or segment_retryable):
+                    # The upstream is reachable outside EasyProxy, but the
+                    # shared aiohttp DIRECT connector can retain a dead
+                    # keep-alive socket. Recreate only that connector and
+                    # retry on DIRECT; never switch this request to WARP or
+                    # another proxy.
+                    await self._invalidate_direct_session(url or init_url)
+                    _shared.BYPASS_PROXIES_CONTEXT.set(True)
+                    retry_session, retry_proxy = await self._get_proxy_session(
+                        url or init_url,
+                        bypass_warp=True,
+                        forced_proxy=None,
+                    )
+                    try:
+                        retry_init, retry_segment = await asyncio.gather(
+                            fetch_part(
+                                retry_session,
+                                init_url if init_retryable else None,
+                                10,
+                                "init segment (DIRECT retry)",
+                                init_range,
+                            ),
+                            fetch_part(
+                                retry_session,
+                                url if segment_retryable else None,
+                                15,
+                                "segment (DIRECT retry)",
+                                media_range,
+                            ),
+                        )
+                    finally:
+                        if retry_session and not retry_session.closed:
+                            await retry_session.close()
+
+                    if init_retryable and retry_init[0] is not None:
+                        init_content = retry_init[0]
+                    if segment_retryable and retry_segment[0] is not None:
+                        segment_content = retry_segment[0]
+                    if (
+                        (not init_retryable or init_content is not None)
+                        and (not segment_retryable or segment_content is not None)
+                    ):
+                        logger.warning(
+                            "Recovered ClearKey request through a fresh DIRECT session [%s]",
+                            request_log_context(
+                                request,
+                                url or init_url,
+                                route="DIRECT",
+                            ),
+                        )
             finally:
                 if segment_session and not segment_session.closed:
                     await segment_session.close()
+
+            fetch_elapsed = time.monotonic() - fetch_started_at
 
             if init_content is None and init_url:
                 logger.error(
@@ -1895,9 +1950,11 @@ class HLSProxyStreamingMixin:
                 # Decripta con PyCryptodome
                 # Decrypt in thread pool to avoid blocking event loop
                 loop = asyncio.get_event_loop()
+                decrypt_started_at = time.monotonic()
                 combined_content = await loop.run_in_executor(
                     None, decrypt_segment, init_content, segment_content, key_id, key, skip_init
                 )
+                decrypt_elapsed = time.monotonic() - decrypt_started_at
 
             # Serve raw decrypted fMP4.  DASH uses `.m4s` for both tracks, so
             # preserve the track kind explicitly for Safari's native demuxer.
@@ -1909,9 +1966,11 @@ class HLSProxyStreamingMixin:
             content_type = "audio/mp4" if media_type == "audio" else "video/mp4"
 
             logger.info(
-                "✅ [Decrypt] Completed: track=%s bytes=%d elapsed=%.2fs [%s]",
+                "✅ [Decrypt] Completed: track=%s bytes=%d fetch=%.2fs decrypt=%.2fs total=%.2fs [%s]",
                 media_type,
                 len(ts_content),
+                fetch_elapsed,
+                decrypt_elapsed,
                 time.monotonic() - decrypt_started,
                 request_log_context(
                     request,
