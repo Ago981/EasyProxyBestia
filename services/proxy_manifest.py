@@ -33,6 +33,161 @@ from services.proxy_shared import (
 
 class HLSProxyManifestHandlerMixin:
 
+    @staticmethod
+    def _mpd_fetch_key(url, headers, bypass_warp, bypass_proxies, selected_proxy):
+        """Return a stable key for concurrent requests of the same MPD."""
+        header_items = tuple(
+            sorted(
+                (str(name).lower(), str(value))
+                for name, value in (headers or {}).items()
+            )
+        )
+        return (
+            str(url),
+            header_items,
+            bool(bypass_warp),
+            bool(bypass_proxies),
+            str(selected_proxy or ""),
+        )
+
+    async def _fetch_mpd_manifest(
+        self,
+        request,
+        stream_url,
+        stream_headers,
+        bypass_warp,
+        bypass_proxies,
+        selected_proxy,
+        extractor,
+    ):
+        """Fetch one MPD, sharing only simultaneous callers.
+
+        This intentionally retains no MPD/segment cache. It only prevents an
+        iOS player opening video and audio playlists at the same time from
+        creating several identical upstream MPD requests.
+        """
+        ssl_context = False if get_ssl_setting_for_url(stream_url) else None
+        retries = 2
+
+        for attempt in range(retries):
+            mpd_proxy = None
+            mpd_session = None
+            started = asyncio.get_running_loop().time()
+            try:
+                mpd_session, mpd_proxy = await self._get_proxy_session(
+                    stream_url,
+                    bypass_warp=bypass_warp,
+                    forced_proxy=selected_proxy,
+                )
+                logger.info(
+                    "📡 [MPD] Attempt %s/%s via %s [%s]",
+                    attempt + 1,
+                    retries,
+                    safe_log_route(mpd_proxy),
+                    request_log_context(
+                        request,
+                        stream_url,
+                        route=safe_log_route(mpd_proxy),
+                        extractor=extractor,
+                    ),
+                )
+
+                async with mpd_session.get(
+                    stream_url,
+                    headers=stream_headers,
+                    ssl=ssl_context,
+                    allow_redirects=True,
+                ) as resp:
+                    final_mpd_url = str(resp.url)
+                    if final_mpd_url != stream_url:
+                        logger.info(
+                            "↪️ MPD redirected [%s]",
+                            request_log_context(
+                                request,
+                                final_mpd_url,
+                                route=safe_log_route(mpd_proxy),
+                                extractor=extractor,
+                            ),
+                        )
+
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(
+                            "❌ Failed to fetch MPD: status=%s [%s]",
+                            resp.status,
+                            request_log_context(
+                                request,
+                                stream_url,
+                                route=safe_log_route(mpd_proxy),
+                                extractor=extractor,
+                            ),
+                        )
+                        if attempt == retries - 1:
+                            return None, None
+                        await asyncio.sleep(1)
+                        continue
+
+                    manifest_content = await resp.text()
+                    logger.debug(
+                        "[MPD] fetched bytes=%d time=%.3fs route=%s",
+                        len(manifest_content),
+                        asyncio.get_running_loop().time() - started,
+                        safe_log_route(mpd_proxy),
+                    )
+                    return manifest_content, final_mpd_url
+
+            except ALL_PROXY_ERRORS + (asyncio.TimeoutError, ClientConnectionError, OSError) as error:
+                is_proxy = isinstance(error, ALL_PROXY_ERRORS)
+                if not is_proxy and mpd_proxy and isinstance(error, (ClientConnectionError, OSError)):
+                    is_proxy = True
+                logger.warning(
+                    "⚠️ [MPD] %s error at attempt %s: %s elapsed=%.3fs [%s]",
+                    "Proxy" if is_proxy else "Timeout",
+                    attempt + 1,
+                    error,
+                    asyncio.get_running_loop().time() - started,
+                    request_log_context(
+                        request,
+                        stream_url,
+                        route=safe_log_route(mpd_proxy),
+                        extractor=extractor,
+                    ),
+                )
+                if mpd_proxy and "127.0.0.1" in mpd_proxy:
+                    self._mark_proxy_dead_if_allowed(
+                        mpd_proxy,
+                        extractor_key=request.query.get("extractor_key"),
+                    )
+                if mpd_proxy:
+                    await self._invalidate_proxy_session(mpd_proxy)
+                if is_proxy and SELECTED_PROXY_CONTEXT.get() and not STRICT_PROXY_CONTEXT.get():
+                    SELECTED_PROXY_CONTEXT.set(None)
+                if attempt < retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+                return None, None
+            except Exception as error:
+                logger.error(
+                    "❌ [MPD] Unexpected error at attempt %s: %s [%s]",
+                    attempt + 1,
+                    error,
+                    request_log_context(
+                        request,
+                        stream_url,
+                        route=safe_log_route(mpd_proxy),
+                        extractor=extractor,
+                    ),
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+                return None, None
+            finally:
+                if mpd_session and not mpd_session.closed:
+                    await mpd_session.close()
+
+        return None, None
+
     async def handle_proxy_request(self, request):
         """Gestisce le richieste proxy principali"""
         if not check_password(request):
@@ -478,153 +633,62 @@ class HLSProxyManifestHandlerMixin:
                         text="Legacy MPD converter not available", status=503
                     )
 
-                # Fetch the MPD manifest with proxy support
-                ssl_context = None
-                disable_ssl = get_ssl_setting_for_url(stream_url)
-                if disable_ssl:
-                    ssl_context = False
+                # Fetch the MPD once for simultaneous video/audio playlist
+                # requests. This is in-flight coalescing only: no MPD or
+                # segment body is retained after the request group finishes.
+                mpd_key = self._mpd_fetch_key(
+                    stream_url,
+                    stream_headers,
+                    bypass_warp,
+                    bypass_proxies,
+                    selected_proxy,
+                )
+                mpd_inflight = getattr(self, "_mpd_inflight", None)
+                if mpd_inflight is None:
+                    mpd_inflight = {}
+                    self._mpd_inflight = mpd_inflight
 
-                manifest_content = None
-                final_mpd_url = stream_url
-                retries = 2
-                for attempt in range(retries):
-                    mpd_proxy = None
-                    mpd_session = None
-                    try:
-                        # Use helper to get proxy-enabled session
-                        mpd_session, mpd_proxy = await self._get_proxy_session(
-                            stream_url, bypass_warp=bypass_warp, forced_proxy=selected_proxy
-                        )
-                        logger.info(
-                            "📡 [MPD] Attempt %s/%s via %s [%s]",
-                            attempt + 1,
-                            retries,
-                            safe_log_route(mpd_proxy),
-                            request_log_context(
-                                request,
-                                stream_url,
-                                route=safe_log_route(mpd_proxy),
-                                extractor=extractor,
-                            ),
-                        )
-
-                        async with mpd_session.get(
+                mpd_task = mpd_inflight.get(mpd_key)
+                if mpd_task is None or mpd_task.done():
+                    mpd_task = asyncio.create_task(
+                        self._fetch_mpd_manifest(
+                            request,
                             stream_url,
-                            headers=stream_headers,
-                            ssl=ssl_context,
-                            allow_redirects=True,
-                        ) as resp:
-                            # Capture final URL after redirects
-                            final_mpd_url = str(resp.url)
-                            if final_mpd_url != stream_url:
-                                logger.info(
-                                    "↪️ MPD redirected [%s]",
-                                    request_log_context(
-                                        request,
-                                        final_mpd_url,
-                                        route=safe_log_route(mpd_proxy),
-                                        extractor=extractor,
-                                    ),
-                                )
-
-                            if resp.status != 200:
-                                error_text = await resp.text()
-                                logger.error(
-                                    "❌ Failed to fetch MPD: status=%s [%s]",
-                                    resp.status,
-                                    request_log_context(
-                                        request,
-                                        stream_url,
-                                        route=safe_log_route(mpd_proxy),
-                                        extractor=extractor,
-                                    ),
-                                )
-                                if attempt == retries - 1:
-                                    return web.Response(
-                                        text=f"Failed to fetch MPD: {resp.status}\nResponse: {error_text[:1000]}",
-                                        status=502,
-                                    )
-                                await asyncio.sleep(1)
-                                continue
-
-                            manifest_content = await resp.text()
-                            break # Success
-
-                    except ALL_PROXY_ERRORS + (asyncio.TimeoutError, ClientConnectionError, OSError) as e:
-                        is_proxy = isinstance(e, ALL_PROXY_ERRORS)
-                        # Consider ClientConnectionError/OSError as proxy errors if a proxy was used
-                        if not is_proxy and mpd_proxy and isinstance(e, (ClientConnectionError, OSError)):
-                            is_proxy = True
-
-                        err_type = "Proxy" if is_proxy else "Timeout"
-                        logger.warning(
-                            "⚠️ [MPD] %s error at attempt %s: %s [%s]",
-                            err_type,
-                            attempt + 1,
-                            e,
-                            request_log_context(
-                                request,
-                                stream_url,
-                                route=safe_log_route(mpd_proxy),
-                                extractor=extractor,
-                            ),
+                            stream_headers,
+                            bypass_warp,
+                            bypass_proxies,
+                            selected_proxy,
+                            extractor,
                         )
+                    )
+                    mpd_inflight[mpd_key] = mpd_task
 
-                        # Mark local proxy as dead if it failed
-                        if mpd_proxy and "127.0.0.1" in mpd_proxy:
-                            self._mark_proxy_dead_if_allowed(
-                                mpd_proxy,
-                                extractor_key=request.query.get("extractor_key"),
-                            )
-                        if mpd_proxy:
-                            # A pooled SOCKS connector can remain open while
-                            # WireProxy's tunnel is stale. Reusing it for the
-                            # retry only repeats the same timeout; force the
-                            # next attempt to create a fresh route session.
-                            await self._invalidate_proxy_session(mpd_proxy)
-                        # Clear sticky context if it's a proxy error
-                        if is_proxy and SELECTED_PROXY_CONTEXT.get() and not STRICT_PROXY_CONTEXT.get():
-                            logger.info("   [MPD] Clearing sticky proxy context due to ProxyError")
-                            SELECTED_PROXY_CONTEXT.set(None)
+                    def _clear_mpd_task(done_task, key=mpd_key):
+                        if getattr(self, "_mpd_inflight", {}).get(key) is done_task:
+                            self._mpd_inflight.pop(key, None)
 
-                        if attempt < retries - 1:
-                            logger.info(
-                                "   [MPD] Retrying [%s]",
-                                request_log_context(
-                                    request,
-                                    stream_url,
-                                    route=safe_log_route(mpd_proxy),
-                                    extractor=extractor,
-                                ),
-                            )
-                            await asyncio.sleep(1)
-                        else:
-                            return web.Response(text=f"MPD unreachable: {e}", status=502)
-                    except Exception as e:
-                        logger.error(
-                            "❌ [MPD] Unexpected error at attempt %s: %s [%s]",
-                            attempt + 1,
-                            e,
-                            request_log_context(
-                                request,
-                                stream_url,
-                                route=safe_log_route(mpd_proxy),
-                                extractor=extractor,
-                            ),
-                        )
-                        if attempt == retries - 1:
-                            return web.Response(text=f"Unexpected error fetching MPD: {e}", status=500)
-                        await asyncio.sleep(1)
-                    finally:
-                        if mpd_session and not mpd_session.closed:
-                            await mpd_session.close()
+                    mpd_task.add_done_callback(_clear_mpd_task)
+                else:
+                    logger.debug(
+                        "[MPD] joining in-flight fetch [%s]",
+                        request_log_context(
+                            request,
+                            stream_url,
+                            route=safe_log_route(selected_proxy),
+                            extractor=extractor,
+                        ),
+                    )
 
+                manifest_content, final_mpd_url = await asyncio.shield(mpd_task)
                 if manifest_content is None:
-                     logger.error(
-                         "❌ Failed to fetch MPD manifest after all attempts [%s]",
-                         request_log_context(request, stream_url, extractor=extractor),
-                     )
-                     return web.Response(text="Failed to fetch MPD manifest after all attempts", status=502)
+                    logger.error(
+                        "❌ Failed to fetch MPD manifest after all attempts [%s]",
+                        request_log_context(request, stream_url, extractor=extractor),
+                    )
+                    return web.Response(
+                        text="Failed to fetch MPD manifest after all attempts",
+                        status=502,
+                    )
 
                 # Build proxy base URL
                 proxy_base = get_public_base_url(request)
