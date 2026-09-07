@@ -195,6 +195,9 @@ class MP4Decrypter:
         self.trun_sample_sizes = array.array("I")
         self.current_sample_info = []
         self.encryption_overhead = 0
+        # Bytes removed from the current moof before mdat.  The trun data
+        # offset and any following sidx reference must account for them.
+        self._moof_removed_overhead = 0
         self.track_kid_map = {}  # track_id -> KID (bytes) from tenc box
         self._last_extracted_kid = None  # temp storage during moov processing
         self._default_sample_size = 0  # from tfhd, used when trun lacks sample-size-present
@@ -296,8 +299,17 @@ class MP4Decrypter:
         """
         parser = MP4Parser(moof.data)
         new_moof_data = bytearray()
+        # Some CMAF/DASH origins repeat Widevine/PlayReady PSSH boxes in
+        # every media moof, not only in the initialization segment.  Once
+        # ClearKey decryption has completed, those boxes must not reach the
+        # HLS/fMP4 player or it may open an unsupported DRM session again.
+        self._moof_removed_overhead = sum(
+            atom.size for atom in parser.list_atoms() if atom.atom_type == b"pssh"
+        )
 
         for atom in iter(parser.read_atom, None):
+            if atom.atom_type == b"pssh":
+                continue
             if atom.atom_type == b"traf":
                 new_traf = self._process_traf(atom)
                 new_moof_data.extend(new_traf.pack())
@@ -332,7 +344,9 @@ class MP4Decrypter:
 
         atoms = parser.list_atoms()
 
-        self.encryption_overhead = sum(a.size for a in atoms if a.atom_type in {b"senc", b"saiz", b"saio", b"sbgp", b"sgpd"})
+        self.encryption_overhead = self._moof_removed_overhead + sum(
+            a.size for a in atoms if a.atom_type in {b"senc", b"saiz", b"saio", b"sbgp", b"sgpd"}
+        )
 
         for atom in atoms:
             if atom.atom_type == b"tfhd":
