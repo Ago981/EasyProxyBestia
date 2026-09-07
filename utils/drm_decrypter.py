@@ -7,6 +7,13 @@ from Crypto.Cipher import AES
 from collections import namedtuple
 import array
 
+try:
+    # OpenSSL-backed CTR is materially faster for the multi-sample fMP4
+    # segments used by the MPD->HLS compatibility path.
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+except ImportError:  # pragma: no cover - exercised only in minimal installs
+    Cipher = algorithms = modes = None
+
 CENCSampleAuxiliaryDataFormat = namedtuple("CENCSampleAuxiliaryDataFormat", ["is_encrypted", "iv", "sub_samples"])
 
 
@@ -474,23 +481,34 @@ class MP4Decrypter:
 
         # pad IV to 16 bytes
         iv = sample_info.iv + b"\x00" * (16 - len(sample_info.iv))
-        cipher = AES.new(key, AES.MODE_CTR, initial_value=iv, nonce=b"")
+        if Cipher is not None:
+            cipher = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
+            decrypt = cipher.update
+            finalize = cipher.finalize
+        else:
+            cipher = AES.new(key, AES.MODE_CTR, initial_value=iv, nonce=b"")
+            decrypt = cipher.decrypt
+            finalize = lambda: b""
 
         if not sample_info.sub_samples:
             # If there are no sub_samples, decrypt the entire sample
-            return cipher.decrypt(sample)
+            result = decrypt(sample)
+            finalize()
+            return result
 
         result = bytearray()
         offset = 0
         for clear_bytes, encrypted_bytes in sample_info.sub_samples:
             result.extend(sample[offset : offset + clear_bytes])
             offset += clear_bytes
-            result.extend(cipher.decrypt(sample[offset : offset + encrypted_bytes]))
+            result.extend(decrypt(sample[offset : offset + encrypted_bytes]))
             offset += encrypted_bytes
 
         # If there's any remaining data, treat it as encrypted
         if offset < len(sample):
-            result.extend(cipher.decrypt(sample[offset:]))
+            result.extend(decrypt(sample[offset:]))
+
+        finalize()
 
         return result
 

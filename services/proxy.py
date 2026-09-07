@@ -66,8 +66,11 @@ class HLSProxy(
 
         # Version information
         self.latest_version = "Checking..."
+        self._latest_version_checked_at = 0.0
         self.warp_status = "Checking..."
         self._warp_ip = ""
+        self._warp_status_checked_at = 0.0
+        self._warp_status_reason = ""
 
 
 __all__ = ["HLSProxy"]
