@@ -247,70 +247,68 @@ class MPDToHLSConverter:
                 lines[1] = '#EXT-X-VERSION:6'
 
             # --- GESTIONE VIDEO (EXT-X-STREAM-INF) ---
-            # I live MPD devono restare adaptive: forzare il solo profilo
-            # massimo manda i player iOS direttamente sul video da 7 Mbps,
-            # causando buffering quando la banda reale oscilla.  Ordiniamo i
-            # profili dal più leggero al più pesante, lasciando al player la
-            # scelta adattiva.  Non tocchiamo segmenti, ClearKey o Widevine.
+            # Live MPD: mantieni il comportamento stabile. Esporre tutte le
+            # rappresentazioni può fare aprire a player iOS più playlist/init
+            # contemporaneamente e rallentare l'avvio. I VOD restano adaptive.
             live_mpd = root.get('type', 'static').lower() == 'dynamic'
-            video_representations = [
-                (adaptation_set, representation)
-                for adaptation_set in video_sets
-                for representation in adaptation_set.findall('mpd:Representation', self.ns)
-                if 'iframe' not in representation.get('id', '').lower()
-                and 'i-frame' not in representation.get('id', '').lower()
-            ]
-
+            max_height = 0
             if live_mpd:
-                def video_sort_key(item):
-                    _, representation = item
-                    try:
-                        bandwidth = int(representation.get('bandwidth', '0'))
-                    except (TypeError, ValueError):
-                        bandwidth = 0
-                    try:
-                        height = int(representation.get('height', '0'))
-                    except (TypeError, ValueError):
-                        height = 0
-                    return bandwidth, height
+                for adaptation_set in video_sets:
+                    for rep in adaptation_set.findall('mpd:Representation', self.ns):
+                        rep_id = rep.get('id', '').lower()
+                        if 'iframe' in rep_id or 'i-frame' in rep_id:
+                            continue
+                        try:
+                            max_height = max(max_height, int(rep.get('height', 0)))
+                        except (TypeError, ValueError):
+                            continue
 
-                video_representations.sort(key=video_sort_key)
+            for adaptation_set in video_sets:
+                for representation in adaptation_set.findall('mpd:Representation', self.ns):
+                    rep_id = representation.get('id', '')
+                    if 'iframe' in rep_id.lower() or 'i-frame' in rep_id.lower():
+                        continue
+                    if live_mpd and max_height:
+                        try:
+                            if int(representation.get('height', 0)) < max_height:
+                                continue
+                        except (TypeError, ValueError):
+                            pass
 
-            for adaptation_set, representation in video_representations:
-                rep_id = representation.get('id')
-                bandwidth = representation.get('bandwidth')
-                width = representation.get('width')
-                height = representation.get('height')
-                frame_rate = representation.get('frameRate') or adaptation_set.get('frameRate')
-                codecs = self._hls_codec(representation.get('codecs') or adaptation_set.get('codecs'))
+                    rep_id = representation.get('id')
+                    bandwidth = representation.get('bandwidth')
+                    width = representation.get('width')
+                    height = representation.get('height')
+                    frame_rate = representation.get('frameRate') or adaptation_set.get('frameRate')
+                    codecs = self._hls_codec(representation.get('codecs') or adaptation_set.get('codecs'))
                     
-                encoded_url = urllib.parse.quote(original_url, safe='')
-                encoded_rep_id = urllib.parse.quote(str(rep_id or ''), safe='')
-                header_params = self._extract_header_params(params)
-                media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={encoded_rep_id}{header_params}"
+                    encoded_url = urllib.parse.quote(original_url, safe='')
+                    encoded_rep_id = urllib.parse.quote(str(rep_id or ''), safe='')
+                    header_params = self._extract_header_params(params)
+                    media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={encoded_rep_id}{header_params}"
                     
-                # Determine codecs (must combine video and audio codecs for HLS spec compliance)
-                combined_codecs = []
-                if codecs:
-                    combined_codecs.append(codecs)
-                if has_audio:
-                    combined_codecs.extend(audio_codecs_list)
+                    # Determine codecs (must combine video and audio codecs for HLS spec compliance)
+                    combined_codecs = []
+                    if codecs:
+                        combined_codecs.append(codecs)
+                    if has_audio:
+                        combined_codecs.extend(audio_codecs_list)
 
-                audio_bandwidth = max((int(rep.get('bandwidth', '0')) for _, rep in audio_reps), default=0)
-                inf = f'#EXT-X-STREAM-INF:BANDWIDTH={int(bandwidth) + audio_bandwidth}'
-                if width and height:
-                    inf += f',RESOLUTION={width}x{height}'
-                if frame_rate:
-                    inf += f',FRAME-RATE={float(Fraction(frame_rate)):.3f}'
-                if combined_codecs:
-                    inf += f',CODECS="{",".join(combined_codecs)}"'
+                    audio_bandwidth = max((int(rep.get('bandwidth', '0')) for _, rep in audio_reps), default=0)
+                    inf = f'#EXT-X-STREAM-INF:BANDWIDTH={int(bandwidth) + audio_bandwidth}'
+                    if width and height:
+                        inf += f',RESOLUTION={width}x{height}'
+                    if frame_rate:
+                        inf += f',FRAME-RATE={float(Fraction(frame_rate)):.3f}'
+                    if combined_codecs:
+                        inf += f',CODECS="{",".join(combined_codecs)}"'
                     
-                # Collega il gruppo audio se presente
-                if has_audio:
-                    inf += f',AUDIO="{audio_group_id}"'
+                    # Collega il gruppo audio se presente
+                    if has_audio:
+                        inf += f',AUDIO="{audio_group_id}"'
                     
-                lines.append(inf)
-                lines.append(media_url)
+                    lines.append(inf)
+                    lines.append(media_url)
             
             return '\n'.join(lines)
         except Exception as e:
