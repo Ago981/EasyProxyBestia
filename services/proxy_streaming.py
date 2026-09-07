@@ -1879,12 +1879,16 @@ class HLSProxyStreamingMixin:
                     # keep-alive socket. Recreate only that connector and
                     # retry on DIRECT; never switch this request to WARP or
                     # another proxy.
-                    await self._invalidate_direct_session(url or init_url)
+                    await self._invalidate_direct_session(
+                        url or init_url,
+                        session_key=stream_session_key,
+                    )
                     _shared.BYPASS_PROXIES_CONTEXT.set(True)
                     retry_session, retry_proxy = await self._get_proxy_session(
                         url or init_url,
                         bypass_warp=True,
                         forced_proxy=None,
+                        session_key=stream_session_key,
                     )
                     try:
                         retry_init, retry_segment = await asyncio.gather(

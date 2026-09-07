@@ -846,6 +846,40 @@ class HLSProxyCoreMixin:
             self._proxy_session_atimes[proxy] = time.time()
             return SharedSessionWrapper(session), proxy
 
+        if session_key:
+            if not hasattr(self, "_stream_proxy_sessions"):
+                self._stream_proxy_sessions = {}
+                self._stream_proxy_session_atimes = {}
+            stream_key = (None, str(session_key), prefer_default_family)
+            stream_session = self._stream_proxy_sessions.get(stream_key)
+            if stream_session is None or stream_session.closed:
+                logger.info(
+                    "[NET] Creating per-stream DIRECT session: %s",
+                    str(session_key)[:32],
+                )
+                connector_kwargs = {
+                    "limit": 0,
+                    "limit_per_host": 0,
+                    "keepalive_timeout": 15,
+                    "enable_cleanup_closed": True,
+                    "use_dns_cache": True,
+                }
+                if not prefer_default_family:
+                    connector_kwargs["family"] = socket.AF_INET
+                connector = TCPConnector(**connector_kwargs)
+                stream_session = ClientSession(
+                    timeout=ClientTimeout(
+                        total=None,
+                        connect=30,
+                        sock_connect=30,
+                        sock_read=30,
+                    ),
+                    connector=connector,
+                )
+                self._stream_proxy_sessions[stream_key] = stream_session
+            self._stream_proxy_session_atimes[stream_key] = time.time()
+            return SharedSessionWrapper(stream_session), None
+
         session = await self._get_session(prefer_default_family=prefer_default_family)
         return SharedSessionWrapper(session), None
 
@@ -905,9 +939,25 @@ class HLSProxyCoreMixin:
         logger.warning("[NET] Invalidated pooled proxy session: %s", proxy_url)
         return True
 
-    async def _invalidate_direct_session(self, url: str | None = None) -> bool:
+    async def _invalidate_direct_session(
+        self,
+        url: str | None = None,
+        session_key: str | None = None,
+    ) -> bool:
         """Detach a stale shared DIRECT connector without changing routing policy."""
         prefer_default_family = prefer_default_family_for_url(url or "")
+        if session_key is not None:
+            stream_sessions = getattr(self, "_stream_proxy_sessions", None)
+            stream_atimes = getattr(self, "_stream_proxy_session_atimes", None)
+            if stream_sessions is not None and stream_atimes is not None:
+                key = (None, str(session_key), prefer_default_family)
+                session = stream_sessions.pop(key, None)
+                stream_atimes.pop(key, None)
+                if session and not session.closed:
+                    retire_session(self, session)
+                if session:
+                    logger.warning("[NET] Invalidated stream DIRECT session: %s", key[1])
+                return bool(session)
         attr = "flex_session" if prefer_default_family else "session"
         session = getattr(self, attr, None)
         if session is None or session.closed:
