@@ -3,6 +3,7 @@ import os
 import re
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 import aiohttp
 import config_store
 import config as _config
@@ -43,6 +44,15 @@ from services.proxy_shared import (
 
 class _ParallelFallback(Exception):
     """Raised when parallel range fetch is not applicable; falls back to single connection."""
+
+
+# Do not share asyncio's default executor with WARP/proxy socket health checks.
+# Those checks can block for seconds and otherwise delay ClearKey decryption,
+# even though the actual AES/MP4 operation is fast.
+_CLEARKEY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="clearkey",
+)
 
 # Parallel range fetch thresholds: beat per-connection CDN throttling (e.g. vidsonic
 # ~1.7 Mbps/conn vs 2.4 Mbps video) by downloading one segment over K parallel
@@ -1952,7 +1962,13 @@ class HLSProxyStreamingMixin:
                 loop = asyncio.get_event_loop()
                 decrypt_started_at = time.monotonic()
                 combined_content = await loop.run_in_executor(
-                    None, decrypt_segment, init_content, segment_content, key_id, key, skip_init
+                    _CLEARKEY_EXECUTOR,
+                    decrypt_segment,
+                    init_content,
+                    segment_content,
+                    key_id,
+                    key,
+                    skip_init,
                 )
                 decrypt_elapsed = time.monotonic() - decrypt_started_at
 

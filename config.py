@@ -8,6 +8,7 @@ import contextvars
 import tracemalloc
 import urllib.request
 import ipaddress
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from config_store import (
     DEFAULT_RECORDINGS_DIR,
@@ -33,6 +34,15 @@ ALL_PROXY_ERRORS = (
     PyProxyError,
     PyProxyConnectionError,
     PyProxyTimeoutError,
+)
+
+
+# Proxy/WARP socket probes are blocking by design. Keep them out of asyncio's
+# default executor so DNS resolution and media/DRM work are not queued behind
+# a health check that is waiting on a dead proxy.
+_SOCKET_CHECK_EXECUTOR = ThreadPoolExecutor(
+    max_workers=8,
+    thread_name_prefix="proxy-health",
 )
 
 
@@ -250,7 +260,7 @@ async def find_first_alive_async(proxies: list, concurrency: int | None = None) 
             
         async def _check_single(proxy_url=p, idx=i):
             try:
-                await loop.run_in_executor(None, _socket_check, proxy_url, 3)
+                await loop.run_in_executor(_SOCKET_CHECK_EXECUTOR, _socket_check, proxy_url, 3)
                 return idx, proxy_url
             except (OSError, socket.timeout):
                 return idx, None
@@ -318,7 +328,7 @@ async def filter_alive_async(proxies: list, concurrency: int | None = None) -> l
     async def _check(proxy: str):
         async with sem:
             try:
-                await loop.run_in_executor(None, _socket_check, proxy, 2)
+                await loop.run_in_executor(_SOCKET_CHECK_EXECUTOR, _socket_check, proxy, 2)
                 return proxy
             except (OSError, socket.timeout):
                 return None
@@ -599,7 +609,7 @@ async def is_proxy_alive_async(proxy_url: str, force_check: bool = False) -> boo
             DEAD_PROXIES.pop(proxy_url, None)
     loop = asyncio.get_event_loop()
     try:
-        alive = await loop.run_in_executor(None, _socket_check, proxy_url, 5)
+        alive = await loop.run_in_executor(_SOCKET_CHECK_EXECUTOR, _socket_check, proxy_url, 5)
         if not alive:
             raise OSError("Proxy check returned false")
     except (socket.timeout, ConnectionRefusedError, OSError):
