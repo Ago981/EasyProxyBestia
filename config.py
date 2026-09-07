@@ -1259,8 +1259,10 @@ def get_system_stats():
             "peak_mb": round(traced_peak / (1024 * 1024), 3),
         }
 
-    # EasyProxy process CPU (including child processes)
+    # EasyProxy process CPU (including child processes). Keep per-process
+    # readings so /api/info can identify whether Python or wireproxy is hot.
     proxy_cpu_percent = cpu_percent
+    process_cpu = {}
     try:
         # Use persistent Process objects: psutil.cpu_percent() needs a previous
         # baseline reading, otherwise it always returns 0.0.
@@ -1285,15 +1287,22 @@ def get_system_stats():
                 child.cpu_percent(interval=None)  # establish baseline
 
         p_cpu = _cpu_proc.cpu_percent(interval=None)
+        process_cpu[_cpu_proc.pid] = p_cpu
         for child in _cpu_children.values():
             try:
-                p_cpu += child.cpu_percent(interval=None)
+                child_cpu = child.cpu_percent(interval=None)
+                process_cpu[child.pid] = child_cpu
+                p_cpu += child_cpu
             except Exception:
                 pass
         get_system_stats._cpu_children = _cpu_children
 
         cores = os.cpu_count() or 1
         proxy_cpu_percent = min(100.0, p_cpu / cores)
+        for snapshot in process_tree:
+            raw = process_cpu.get(snapshot.get("pid"), 0.0)
+            snapshot["cpu_percent_raw"] = round(raw, 1)
+            snapshot["cpu_percent"] = round(min(100.0, raw / cores), 1)
     except Exception:
         pass
 

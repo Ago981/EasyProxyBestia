@@ -433,9 +433,26 @@ class HLSProxyCoreMixin:
         return False
 
     async def get_warp_status(self) -> str:
-        """Returns WARP status and fetches real external IP through WARP proxy."""
+        """Return cached WARP status; avoid probing SOCKS on every admin poll."""
+        if not _shared.ENABLE_WARP or not _shared.WARP_PROXY_URL:
+            self.warp_status = "Disabled"
+            self._warp_ip = ""
+            self._warp_status_reason = "WARP disabled or proxy URL missing"
+            self._warp_status_checked_at = time.monotonic()
+            return self.warp_status
+
+        now = time.monotonic()
+        if (
+            self.warp_status in {"Connected", "Disconnected"}
+            and now - getattr(self, "_warp_status_checked_at", 0.0) < 15.0
+        ):
+            return self.warp_status
+
         healthy, _reason = await self._probe_warp(timeout_sec=10)
-        return "Connected" if healthy else "Disconnected"
+        self.warp_status = "Connected" if healthy else "Disconnected"
+        self._warp_status_reason = _reason
+        self._warp_status_checked_at = time.monotonic()
+        return self.warp_status
 
     async def _run_warp_control(self, action: str) -> int:
         """Run the explicit userspace WARP control action."""
@@ -495,6 +512,13 @@ class HLSProxyCoreMixin:
         Can be called on-demand (e.g. on page refresh).
         Uses its own temporary session to avoid resetting the shared session idle timer.
         """
+        now = time.monotonic()
+        if now - getattr(self, "_latest_version_checked_at", 0.0) < 3600.0:
+            return
+        # Set before I/O so simultaneous page/API requests cannot create
+        # duplicate GitHub sessions. Background task retries on next interval.
+        self._latest_version_checked_at = now
+
         try:
             cache_buster = int(time.time())
             url = f"https://raw.githubusercontent.com/realbestia1/EasyProxy/main/config.py?t={cache_buster}"

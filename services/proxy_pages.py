@@ -248,9 +248,6 @@ class HLSProxyPagesMixin:
 
     async def handle_api_info(self, request):
         """Endpoint API che restituisce le informazioni sul server in formato JSON."""
-        # Refresh version on API call
-        await self._refresh_latest_version()
-
         stats = get_system_stats()
         active_streams = _shared.get_active_streams()
 
@@ -288,6 +285,9 @@ class HLSProxyPagesMixin:
                     if s and not s.closed and hasattr(s, '_connector') and hasattr(s._connector, '_conns')
                 ),
                 "parallel_fetch": dict(getattr(self, "_parallel_fetch_stats", {})),
+                "cpu": stats.get("cpu", {}),
+                "proxy_cpu": stats.get("proxy_cpu", {}),
+                "net": stats.get("net", {}),
             },
             "memory": {
                 **stats.get("proxy_ram", {}),
