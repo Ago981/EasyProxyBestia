@@ -238,7 +238,10 @@ class HLSProxyCoreMixin:
             if self._warp_established_connections() != 0:
                 return
             warp_url = _shared.WARP_PROXY_URL
-            await self._invalidate_proxy_session(warp_url)
+            await self._invalidate_proxy_session(
+                warp_url,
+                invalidate_streams=True,
+            )
             try:
                 rc = await self._run_warp_control("restart")
             except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
@@ -850,6 +853,7 @@ class HLSProxyCoreMixin:
         self,
         proxy_url: str | None,
         session_key: str | None = None,
+        invalidate_streams: bool = False,
     ) -> bool:
         """Drop one pooled proxy session so the next request gets a new connector."""
         if not proxy_url:
@@ -858,11 +862,18 @@ class HLSProxyCoreMixin:
         invalidated = False
         stream_sessions = getattr(self, "_stream_proxy_sessions", None)
         stream_atimes = getattr(self, "_stream_proxy_session_atimes", None)
-        if stream_sessions is not None and stream_atimes is not None:
+        if (
+            stream_sessions is not None
+            and stream_atimes is not None
+            and (session_key is not None or invalidate_streams)
+        ):
             stream_keys = [
                 key for key in stream_sessions
                 if key[0] == proxy_url
-                and (session_key is None or key[1] == str(session_key))
+                and (
+                    invalidate_streams
+                    or key[1] == str(session_key)
+                )
             ]
             for key in stream_keys:
                 session = stream_sessions.pop(key, None)
