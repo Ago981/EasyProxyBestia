@@ -633,6 +633,11 @@ class HLSProxyCoreMixin:
                 "enable_cleanup_closed": True,
                 "use_dns_cache": True,
             }
+            # The known-good MPD path used IPv4 for DIRECT connections.
+            # Keep WARP/proxy routes dual-stack; this only avoids broken VPS
+            # IPv6 paths for direct CDN requests.
+            if not prefer_default_family:
+                connector_kwargs["family"] = socket.AF_INET
             connector = TCPConnector(**connector_kwargs)
             session = aiohttp.ClientSession(
                 timeout=ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=30),
@@ -958,21 +963,6 @@ class HLSProxyCoreMixin:
 
     async def cleanup(self):
         """Pulizia delle risorse"""
-        prefetch_tasks = list(getattr(self, "prefetch_tasks", set()))
-        for task in prefetch_tasks:
-            task.cancel()
-        if prefetch_tasks:
-            await asyncio.gather(*prefetch_tasks, return_exceptions=True)
-        self.prefetch_tasks.clear()
-        for entry in getattr(self, "_segment_prefetch_cache", {}).values():
-            timer = entry.get("timer")
-            if timer:
-                timer.cancel()
-        getattr(self, "_segment_prefetch_cache", {}).clear()
-        getattr(self, "_segment_next_urls", {}).clear()
-        getattr(self, "_hls_playlist_cache", {}).clear()
-        getattr(self, "_mpd_manifest_cache", {}).clear()
-
         tasks = list(self._background_tasks)
         for task in tasks:
             task.cancel()

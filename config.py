@@ -36,7 +36,7 @@ ALL_PROXY_ERRORS = (
 )
 
 
-APP_VERSION = "2.11.33"
+APP_VERSION = "2.11.34"
 
 _MEMORY_PROFILE_FRAMES = 15
 _memory_profile_baseline = None
@@ -784,6 +784,12 @@ def get_connector_for_proxy(proxy_url: str, **kwargs):
     # avoidable timeouts/buffering. The caller still controls pool limits and
     # idle cleanup.
     if is_warp:
+        # Keep the original hostname in the SOCKS request so TLS preserves
+        # SNI/certificate validation. wireproxy itself is IPv4-only, so its
+        # remote resolver selects the IPv4 path without replacing the host
+        # with a bare address before TLS.
+        force_ipv4 = False
+        rdns = True
         kwargs.setdefault("keepalive_timeout", 15)
         kwargs.setdefault("force_close", False)
 
@@ -793,6 +799,17 @@ def get_connector_for_proxy(proxy_url: str, **kwargs):
         kwargs.setdefault("family", socket.AF_INET)
 
     return connector_cls.from_url(connector_url, rdns=rdns, **kwargs)
+
+
+def get_curl_ipv4_options(proxy_url: str | None) -> dict:
+    """Return curl_cffi options for IPv4-only WARP upstream requests."""
+    if not proxy_url or not is_warp_proxy_url(proxy_url):
+        return {}
+    try:
+        from curl_cffi import CurlOpt
+    except ImportError:
+        return {}
+    return {"curl_options": {CurlOpt.IPRESOLVE: 1}}
 
 
 class _IPv4ProxyConnector(ProxyConnector):
