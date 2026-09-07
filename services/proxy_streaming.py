@@ -1693,6 +1693,33 @@ class HLSProxyStreamingMixin:
                     if byte_range:
                         part_headers["Range"] = f"bytes={byte_range}"
                         part_headers["Accept-Encoding"] = "identity"
+                    connector = getattr(session, "connector", None)
+
+                    def session_diagnostics():
+                        acquired = getattr(connector, "_acquired", ()) if connector else ()
+                        waiters = getattr(connector, "_waiters", {}) if connector else {}
+                        return (
+                            f"session={id(session)} closed={getattr(session, 'closed', None)} "
+                            f"connector_closed={getattr(connector, 'closed', None)} "
+                            f"acquired={len(acquired)} waiters={len(waiters)}"
+                        )
+
+                    debug_dash = os.getenv("EASYPROXY_DASH_DEBUG", "").lower() in {
+                        "1", "true", "yes", "on"
+                    }
+                    if debug_dash:
+                        logger.warning(
+                            "[DASH-DEBUG] label=%s range=%s %s [%s]",
+                            label,
+                            byte_range or "none",
+                            session_diagnostics(),
+                            request_log_context(
+                                request,
+                                part_url,
+                                route=safe_log_route(segment_proxy or forced_proxy),
+                            ),
+                        )
+                    started_at = time.monotonic()
                     try:
                         async with session.get(
                             part_url,
@@ -1719,9 +1746,11 @@ class HLSProxyStreamingMixin:
                             return None, False
                     except network_errors as error:
                         logger.error(
-                            "❌ Failed to fetch %s: %r [%s]",
+                            "❌ Failed to fetch %s: %r elapsed=%.3fs %s [%s]",
                             label,
                             error,
+                            time.monotonic() - started_at,
+                            session_diagnostics(),
                             request_log_context(
                                 request,
                                 part_url,
@@ -1731,9 +1760,11 @@ class HLSProxyStreamingMixin:
                         return None, True
                     except Exception as error:
                         logger.error(
-                            "❌ Failed to fetch %s: %r [%s]",
+                            "❌ Failed to fetch %s: %r elapsed=%.3fs %s [%s]",
                             label,
                             error,
+                            time.monotonic() - started_at,
+                            session_diagnostics(),
                             request_log_context(
                                 request,
                                 part_url,
