@@ -1680,8 +1680,16 @@ class HLSProxyStreamingMixin:
             logger.debug(f"🔍 [Decrypt-DEBUG] bypass_warp={bypass_warp}, forced_proxy={forced_proxy}, warp_param='{request.query.get('warp', 'NOT_FOUND')}'")
             proxy_from_config = get_proxy_for_url(url or init_url, bypass_warp=bypass_warp)
             logger.debug(f"🔍 [Decrypt-DEBUG] get_proxy_for_url returned: {proxy_from_config}")
+            stream_session_key = request.query.get("stream_key")
+            if not stream_session_key:
+                stream_session_key = self._stream_key_for_url(
+                    request.query.get("orig_url")
+                )
             segment_session, segment_proxy = await self._get_proxy_session(
-                url or init_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy
+                url or init_url,
+                bypass_warp=bypass_warp,
+                forced_proxy=forced_proxy,
+                session_key=stream_session_key,
             )
             if segment_proxy:
                 logger.info(f"📡 [Decrypt] Using session via proxy: {segment_proxy}")
@@ -1805,7 +1813,10 @@ class HLSProxyStreamingMixin:
                     and (init_retryable or segment_retryable)
                 )
                 if can_retry_warp:
-                    await self._invalidate_proxy_session(segment_proxy)
+                    await self._invalidate_proxy_session(
+                        segment_proxy,
+                        session_key=stream_session_key,
+                    )
                     warp_healthy, warp_reason = await self._probe_warp(timeout_sec=3)
                     if not warp_healthy:
                         logger.warning(
@@ -1822,6 +1833,7 @@ class HLSProxyStreamingMixin:
                         url or init_url,
                         bypass_warp=False,
                         forced_proxy=segment_proxy,
+                        session_key=stream_session_key,
                     )
                     try:
                         retry_init, retry_segment = await asyncio.gather(
