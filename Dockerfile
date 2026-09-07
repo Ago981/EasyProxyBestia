@@ -38,7 +38,7 @@ RUN set -eux; \
 
 # WARP config generator and stable userspace SOCKS5 relay.
 ARG WGCF_VERSION=2.2.29
-ARG WIREPROXY_VERSION=1.1.2
+ARG WIREPROXY_VERSION=1.1.3
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
