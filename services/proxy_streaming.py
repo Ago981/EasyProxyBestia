@@ -50,7 +50,6 @@ class _ParallelFallback(Exception):
 # Those checks can block for seconds and otherwise delay ClearKey decryption,
 # even though the actual AES/MP4 operation is fast.
 _CLEARKEY_EXECUTOR = ThreadPoolExecutor(
-    max_workers=4,
     thread_name_prefix="clearkey",
 )
 
