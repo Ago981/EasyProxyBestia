@@ -483,6 +483,9 @@ class HLSProxyCoreMixin:
                 if rc != 0:
                     return {"status": "error", "message": "wireproxy restart failed"}
                 healthy, reason = await self._probe_warp(timeout_sec=8)
+                self.warp_status = "Connected" if healthy else "Disconnected"
+                self._warp_status_reason = reason
+                self._warp_status_checked_at = time.monotonic()
                 if healthy:
                     return {"status": "ok", "message": "WARP userspace tunnel reconnected"}
                 return {

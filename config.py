@@ -1317,7 +1317,9 @@ def get_system_stats():
             "percent": round(cpu_percent, 1)
         },
         "proxy_cpu": {
-            "percent": round(proxy_cpu_percent, 1)
+            "percent": round(proxy_cpu_percent, 1),
+            "percent_raw": round(p_cpu, 1),
+            "cores": cores,
         },
         "ram": {
             "total": ram_total,
