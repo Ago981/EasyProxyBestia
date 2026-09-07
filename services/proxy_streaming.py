@@ -147,7 +147,10 @@ class HLSProxyStreamingMixin:
             )
             return web.Response(text=f"Segment error: {str(e)}", status=500)
 
-    async def _proxy_segment_parallel(self, request, segment_url, headers, segment_name, bypass_warp, forced_proxy):
+    async def _proxy_segment_parallel(
+        self, request, segment_url, headers, segment_name, bypass_warp, forced_proxy,
+        session_key=None,
+    ):
         stats = getattr(self, "_parallel_fetch_stats", None)
         if stats is None:
             stats = {
@@ -167,7 +170,8 @@ class HLSProxyStreamingMixin:
         stats["last_segment"] = str(segment_name or "")[:160]
         try:
             result = await self._proxy_segment_parallel_impl(
-                request, segment_url, headers, segment_name, bypass_warp, forced_proxy
+                request, segment_url, headers, segment_name, bypass_warp, forced_proxy,
+                session_key=session_key,
             )
             stats["successes"] += 1
             stats["last_status"] = "success"
@@ -187,7 +191,10 @@ class HLSProxyStreamingMixin:
             stats["active"] = max(0, stats["active"] - 1)
             stats["last_duration_ms"] = round((time.monotonic() - started) * 1000, 1)
 
-    async def _proxy_segment_parallel_impl(self, request, segment_url, headers, segment_name, bypass_warp, forced_proxy):
+    async def _proxy_segment_parallel_impl(
+        self, request, segment_url, headers, segment_name, bypass_warp, forced_proxy,
+        session_key=None,
+    ):
         """Download one segment via K parallel range requests to beat per-connection
         CDN throttling (e.g. vidsonic limits each TCP connection to ~1.7 Mbps while
         the video is 2.4 Mbps; 3 parallel ranges -> ~5 Mbps aggregate).
@@ -208,7 +215,10 @@ class HLSProxyStreamingMixin:
         # 1) Probe size + Accept-Ranges with a 1-byte range request.
         probe_headers = {**base_headers, "Range": "bytes=0-0"}
         session, session_proxy = await self._get_proxy_session(
-            segment_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy
+            segment_url,
+            bypass_warp=bypass_warp,
+            forced_proxy=forced_proxy,
+            session_key=session_key,
         )
         total = None
         try:
@@ -267,7 +277,10 @@ class HLSProxyStreamingMixin:
         async def _fetch_part_into(start, end):
             h = {**base_headers, "Range": f"bytes={start}-{end}"}
             s, s_proxy = await self._get_proxy_session(
-                segment_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy
+                segment_url,
+                bypass_warp=bypass_warp,
+                forced_proxy=forced_proxy,
+                session_key=session_key,
             )
             try:
                 async with s.get(
@@ -388,6 +401,10 @@ class HLSProxyStreamingMixin:
                 forced_proxy, bypass_warp
             )
 
+            stream_session_key = request.query.get("stream_key") or self._stream_key_for_url(
+                request.query.get("orig_url") or segment_url
+            )
+
             current_proxy = forced_proxy
             attempts = 2 if forced_proxy else 1
             session = None
@@ -398,7 +415,10 @@ class HLSProxyStreamingMixin:
             for attempt in range(attempts):
                 try:
                     session, session_proxy = await self._get_proxy_session(
-                        segment_url, bypass_warp=bypass_warp, forced_proxy=current_proxy
+                        segment_url,
+                        bypass_warp=bypass_warp,
+                        forced_proxy=current_proxy,
+                        session_key=stream_session_key,
                     )
                     disable_ssl = get_ssl_setting_for_url(segment_url) or check_vavoo_request(headers, request, segment_url)
                     # ✅ Use yarl.URL with encoded=True to prevent double-encoding of commas
@@ -584,7 +604,7 @@ class HLSProxyStreamingMixin:
             # ✅ LIVE CDN TOKEN SUBSTITUTION: If the CDN token was refreshed via
             # re-extract on 403, replace the old base URL with the new one so every
             # subsequent segment gets a fresh token without re-extracting each time.
-            stream_key = request.query.get("stream_key")
+            stream_key = stream_key or request.query.get("stream_key")
             if stream_key and stream_key in getattr(self, '_renewed_cdn_tokens', {}):
                 old_b, new_b, new_q = self._renewed_cdn_tokens[stream_key]
                 if stream_url.startswith(old_b):
@@ -704,8 +724,12 @@ class HLSProxyStreamingMixin:
 
             # ✅ Use pooled session for better performance
             if force_direct:
-                session = await self._get_session(url=stream_url)
-                session_proxy = None
+                session, session_proxy = await self._get_proxy_session(
+                    stream_url,
+                    bypass_warp=True,
+                    session_key=stream_key,
+                    force_direct=True,
+                )
                 logger.info(
                     "[Proxy Stream] Using direct session (forced) [%s]",
                     log_context("DIRECT"),
@@ -715,6 +739,7 @@ class HLSProxyStreamingMixin:
                     stream_url,
                     bypass_warp=bypass_warp,
                     forced_proxy=forced_proxy,
+                    session_key=stream_key,
                 )
 
                 # ✅ FIX LOG: Determine correct routing for display
@@ -735,7 +760,13 @@ class HLSProxyStreamingMixin:
                 _seg_name = stream_url.rsplit("/", 1)[-1].split("?")[0]
                 try:
                     return await self._proxy_segment_parallel(
-                        request, stream_url, headers, _seg_name, bypass_warp, forced_proxy
+                        request,
+                        stream_url,
+                        headers,
+                        _seg_name,
+                        bypass_warp,
+                        forced_proxy,
+                        session_key=stream_key,
                     )
                 except _ParallelFallback as _pf:
                     logger.debug(
@@ -882,12 +913,18 @@ class HLSProxyStreamingMixin:
                     extractor_key=request.query.get("extractor_key"),
                 )
                 rot_session, rot_proxy = await self._get_proxy_session(
-                    stream_url, bypass_warp=True, forced_proxy=None,
+                    stream_url,
+                    bypass_warp=True,
+                    forced_proxy=None,
+                    session_key=stream_key,
                 )
                 if not rot_proxy or rot_proxy == old_proxy:
                     await rot_session.close()
                     rot_session, rot_proxy = await self._get_proxy_session(
-                        stream_url, bypass_warp=True, forced_proxy=None,
+                        stream_url,
+                        bypass_warp=True,
+                        forced_proxy=None,
+                        session_key=stream_key,
                     )
 
                 if not rot_proxy or rot_proxy == old_proxy:
@@ -941,7 +978,10 @@ class HLSProxyStreamingMixin:
                     retry_proxy = None
                     try:
                         retry_session, retry_proxy = await self._get_proxy_session(
-                            stream_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy,
+                            stream_url,
+                            bypass_warp=bypass_warp,
+                            forced_proxy=forced_proxy,
+                            session_key=stream_key,
                         )
                         async with retry_session.get(retry_target, headers=headers, ssl=not disable_ssl, timeout=segment_timeout) as retry_resp:
                             if retry_resp.status not in [200, 206]:
@@ -1215,7 +1255,8 @@ class HLSProxyStreamingMixin:
 
                             if rep_id:
                                 # Generate Media Playlist (Segments)
-                                hls_playlist = converter.convert_media_playlist(
+                                hls_playlist = await asyncio.to_thread(
+                                    converter.convert_media_playlist,
                                     manifest_content,
                                     rep_id,
                                     proxy_base,
@@ -1229,7 +1270,8 @@ class HLSProxyStreamingMixin:
                                 )
                             else:
                                 # Generate Master Playlist
-                                hls_playlist = converter.convert_master_playlist(
+                                hls_playlist = await asyncio.to_thread(
+                                    converter.convert_master_playlist,
                                     manifest_content,
                                     proxy_base,
                                     stream_url,
@@ -1543,12 +1585,23 @@ class HLSProxyStreamingMixin:
         retry_session = None
         need_close = False
         retry_proxy = None
+        stream_session_key = request.query.get("stream_key") or self._stream_key_for_url(
+            request.query.get("orig_url") or fresh_url
+        )
         try:
             if force_direct:
-                retry_session = await self._get_session(url=fresh_url)
+                retry_session, retry_proxy = await self._get_proxy_session(
+                    fresh_url,
+                    bypass_warp=True,
+                    session_key=stream_session_key,
+                    force_direct=True,
+                )
             else:
                 retry_session, retry_proxy = await self._get_proxy_session(
-                    fresh_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy,
+                    fresh_url,
+                    bypass_warp=bypass_warp,
+                    forced_proxy=forced_proxy,
+                    session_key=stream_session_key,
                 )
                 if retry_proxy:
                     need_close = True

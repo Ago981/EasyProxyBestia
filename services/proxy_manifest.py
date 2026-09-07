@@ -1,6 +1,6 @@
 import asyncio
+import secrets
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
 import aiohttp
 import config as _config
 import services.proxy_shared as _shared
@@ -33,18 +33,18 @@ from services.proxy_shared import (
 )
 
 
-# MPD conversion is synchronous CPU work. Keep it off the asyncio event loop
-# so concurrent audio/video playlist requests do not stall segment handlers.
-_MPD_CONVERTER_EXECUTOR = ThreadPoolExecutor(
-    max_workers=2,
-    thread_name_prefix="mpd-converter",
-)
-
 class HLSProxyManifestHandlerMixin:
 
     @staticmethod
-    def _mpd_fetch_key(url, headers, bypass_warp, bypass_proxies, selected_proxy):
-        """Return a stable key for concurrent requests of the same MPD."""
+    def _mpd_fetch_key(
+        url,
+        headers,
+        bypass_warp,
+        bypass_proxies,
+        selected_proxy,
+        stream_key=None,
+    ):
+        """Return a key shared only by requests in the same playback."""
         header_items = tuple(
             sorted(
                 (str(name).lower(), str(value))
@@ -57,6 +57,7 @@ class HLSProxyManifestHandlerMixin:
             bool(bypass_warp),
             bool(bypass_proxies),
             str(selected_proxy or ""),
+            str(stream_key or ""),
         )
 
     async def _fetch_mpd_manifest(
@@ -68,6 +69,7 @@ class HLSProxyManifestHandlerMixin:
         bypass_proxies,
         selected_proxy,
         extractor,
+        stream_key=None,
     ):
         """Fetch one MPD, sharing only simultaneous callers.
 
@@ -87,6 +89,7 @@ class HLSProxyManifestHandlerMixin:
                     stream_url,
                     bypass_warp=bypass_warp,
                     forced_proxy=selected_proxy,
+                    session_key=stream_key,
                 )
                 logger.info(
                     "📡 [MPD] Attempt %s/%s via %s [%s]",
@@ -265,6 +268,17 @@ class HLSProxyManifestHandlerMixin:
             if not target_url:
                 return web.Response(text="Missing 'url' or 'd' parameter", status=400)
 
+            # Every new playback gets its own routing/session namespace. The
+            # key is propagated into generated HLS/DASH URLs; stream requests
+            # that already carry it keep it unchanged.
+            stream_key = request.query.get("stream_key")
+            is_rewritten_hls_segment = request.path.startswith("/proxy/hls/segment.")
+            if not stream_key and not is_rewritten_hls_segment:
+                source_key = self._stream_key_for_url(
+                    request.query.get("orig_url") or target_url
+                ) or "stream"
+                stream_key = f"{source_key}-{secrets.token_hex(6)}"
+
             # Record stream activity
             is_segment = (
                 request.path.startswith("/proxy/hls/segment.") or 
@@ -304,12 +318,11 @@ class HLSProxyManifestHandlerMixin:
                     bypass_warp=bypass_warp,
                     forced_proxy=selected_proxy,
                     force_direct=force_direct,
+                    stream_key=stream_key,
                 )
 
             extractor_key = request.query.get("extractor_key")
-            stream_key = request.query.get("stream_key")
             captured_manifest = None
-            is_rewritten_hls_segment = request.path.startswith("/proxy/hls/segment.")
             if is_rewritten_hls_segment:
                 extractor = None
                 stream_url = target_url
@@ -375,7 +388,9 @@ class HLSProxyManifestHandlerMixin:
                 resolved_key = self._extractor_key_for_instance(extractor)
                 if not extractor_key or (resolved_key and not resolved_key.startswith("generic")):
                     extractor_key = resolved_key or extractor_key
-                stream_key = stream_key or self._stream_key_for_url(request.query.get("orig_url") or target_url)
+                stream_key = stream_key or self._stream_key_for_url(
+                    request.query.get("orig_url") or target_url
+                )
                 bypass_warp = result.get("bypass_warp", bypass_warp)
                 stream_url = result["destination_url"]
                 stream_headers = result.get("request_headers", {})
@@ -453,7 +468,10 @@ class HLSProxyManifestHandlerMixin:
                 # Fetch original manifest if not already captured
                 if not captured_manifest:
                     mpd_session, mpd_proxy_used = await self._get_proxy_session(
-                        stream_url, bypass_warp=bypass_warp, forced_proxy=selected_proxy
+                        stream_url,
+                        bypass_warp=bypass_warp,
+                        forced_proxy=selected_proxy,
+                        session_key=stream_key,
                     )
                     try:
                         async with mpd_session.get(stream_url, headers=stream_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -480,7 +498,10 @@ class HLSProxyManifestHandlerMixin:
                         from utils.dash_ranges import expand_segment_bases, fetch_range
                         async def _fetch_sidx(url, range_str):
                             session, _ = await self._get_proxy_session(
-                                url, bypass_warp=bypass_warp, forced_proxy=selected_proxy
+                                url,
+                                bypass_warp=bypass_warp,
+                                forced_proxy=selected_proxy,
+                                session_key=stream_key,
                             )
                             try:
                                 return await fetch_range(session, url, stream_headers, range_str)
@@ -651,6 +672,7 @@ class HLSProxyManifestHandlerMixin:
                     bypass_warp,
                     bypass_proxies,
                     selected_proxy,
+                    stream_key,
                 )
                 mpd_inflight = getattr(self, "_mpd_inflight", None)
                 if mpd_inflight is None:
@@ -668,6 +690,7 @@ class HLSProxyManifestHandlerMixin:
                             bypass_proxies,
                             selected_proxy,
                             extractor,
+                            stream_key,
                         )
                     )
                     mpd_inflight[mpd_key] = mpd_task
@@ -744,12 +767,10 @@ class HLSProxyManifestHandlerMixin:
                 rep_id = request.query.get("rep_id")
 
                 converter = MPDToHLSConverter()
-                loop = asyncio.get_running_loop()
                 if rep_id:
                     # Generate media playlist for specific representation
                     # Use final_mpd_url (after redirects) for segment URL construction
-                    hls_content = await loop.run_in_executor(
-                        _MPD_CONVERTER_EXECUTOR,
+                    hls_content = await asyncio.to_thread(
                         converter.convert_media_playlist,
                         manifest_content,
                         rep_id,
@@ -761,8 +782,7 @@ class HLSProxyManifestHandlerMixin:
                 else:
                     # Generate master playlist
                     # Use final_mpd_url (after redirects) for segment URL construction
-                    hls_content = await loop.run_in_executor(
-                        _MPD_CONVERTER_EXECUTOR,
+                    hls_content = await asyncio.to_thread(
                         converter.convert_master_playlist,
                         manifest_content,
                         proxy_base,

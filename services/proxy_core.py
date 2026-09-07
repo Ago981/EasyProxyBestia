@@ -134,7 +134,7 @@ class HLSProxyCoreMixin:
                         stream_atimes.pop(key, None)
                         if p_sess and not p_sess.closed:
                             retire_session(self, p_sess)
-                            logger.info("[NET] Closed idle stream WARP session: %s", key[1])
+                            logger.info("[NET] Closed idle media session: %s", key[1])
 
                 # 3. Close shared session if idle >30s
                 _session_atime = getattr(self, "_session_atime", 0)
@@ -732,6 +732,7 @@ class HLSProxyCoreMixin:
         bypass_warp: bool = False,
         forced_proxy: str | None = None,
         session_key: str | None = None,
+        force_direct: bool = False,
     ):
         """Create a fresh session or reuse an existing one for the given URL.
 
@@ -777,8 +778,8 @@ class HLSProxyCoreMixin:
                 if p_sess and not p_sess.closed:
                     retire_session(self, p_sess)
 
-        proxy = forced_proxy or get_proxy_for_url(url, bypass_warp=bypass_warp)
-        if not proxy and not _config.is_direct_connection_allowed(bypass_warp):
+        proxy = None if force_direct else (forced_proxy or get_proxy_for_url(url, bypass_warp=bypass_warp))
+        if not proxy and not force_direct and not _config.is_direct_connection_allowed(bypass_warp):
             raise aiohttp.ClientConnectionError(
                 "No proxy route available; direct fallback disabled"
             )
@@ -794,10 +795,9 @@ class HLSProxyCoreMixin:
                 self._proxy_sessions = {}
                 self._proxy_session_atimes = {}
 
-            use_stream_pool = bool(
-                session_key
-                and proxy == _shared.WARP_PROXY_URL
-            )
+            # Media requests get an isolated pool for every playback, no
+            # matter whether route is WARP, another proxy, or direct.
+            use_stream_pool = bool(session_key)
             if use_stream_pool:
                 if not hasattr(self, "_stream_proxy_sessions"):
                     self._stream_proxy_sessions = {}
@@ -806,7 +806,7 @@ class HLSProxyCoreMixin:
                 stream_session = self._stream_proxy_sessions.get(stream_key)
                 if stream_session is None or stream_session.closed:
                     logger.info(
-                        "[NET] Creating per-stream WARP session: %s",
+                        "[NET] Creating per-stream proxy session: %s",
                         str(session_key)[:32],
                     )
                     connector = get_connector_for_proxy(
@@ -881,7 +881,7 @@ class HLSProxyCoreMixin:
             stream_session = self._stream_proxy_sessions.get(stream_key)
             if stream_session is None or stream_session.closed:
                 logger.info(
-                    "[NET] Creating per-stream DIRECT session: %s",
+                    "[NET] Creating per-stream direct session: %s",
                     str(session_key)[:32],
                 )
                 connector_kwargs = {
