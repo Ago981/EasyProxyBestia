@@ -1,5 +1,6 @@
 import asyncio
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 import aiohttp
 import config as _config
 import services.proxy_shared as _shared
@@ -29,6 +30,14 @@ from services.proxy_shared import (
     get_extractor_routing_overrides,
     request_log_context,
     safe_log_route,
+)
+
+
+# MPD conversion is synchronous CPU work. Keep it off the asyncio event loop
+# so concurrent audio/video playlist requests do not stall segment handlers.
+_MPD_CONVERTER_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="mpd-converter",
 )
 
 class HLSProxyManifestHandlerMixin:
@@ -735,10 +744,13 @@ class HLSProxyManifestHandlerMixin:
                 rep_id = request.query.get("rep_id")
 
                 converter = MPDToHLSConverter()
+                loop = asyncio.get_running_loop()
                 if rep_id:
                     # Generate media playlist for specific representation
                     # Use final_mpd_url (after redirects) for segment URL construction
-                    hls_content = converter.convert_media_playlist(
+                    hls_content = await loop.run_in_executor(
+                        _MPD_CONVERTER_EXECUTOR,
+                        converter.convert_media_playlist,
                         manifest_content,
                         rep_id,
                         proxy_base,
@@ -749,8 +761,13 @@ class HLSProxyManifestHandlerMixin:
                 else:
                     # Generate master playlist
                     # Use final_mpd_url (after redirects) for segment URL construction
-                    hls_content = converter.convert_master_playlist(
-                        manifest_content, proxy_base, final_mpd_url, params
+                    hls_content = await loop.run_in_executor(
+                        _MPD_CONVERTER_EXECUTOR,
+                        converter.convert_master_playlist,
+                        manifest_content,
+                        proxy_base,
+                        final_mpd_url,
+                        params,
                     )
 
                 return web.Response(
