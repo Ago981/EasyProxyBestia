@@ -1704,21 +1704,6 @@ class HLSProxyStreamingMixin:
                             f"acquired={len(acquired)} waiters={len(waiters)}"
                         )
 
-                    debug_dash = os.getenv("EASYPROXY_DASH_DEBUG", "").lower() in {
-                        "1", "true", "yes", "on"
-                    }
-                    if debug_dash:
-                        logger.warning(
-                            "[DASH-DEBUG] label=%s range=%s %s [%s]",
-                            label,
-                            byte_range or "none",
-                            session_diagnostics(),
-                            request_log_context(
-                                request,
-                                part_url,
-                                route=safe_log_route(segment_proxy or forced_proxy),
-                            ),
-                        )
                     started_at = time.monotonic()
                     try:
                         async with session.get(
