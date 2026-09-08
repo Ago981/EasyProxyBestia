@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class MPDToHLSConverter:
     """Converte manifest MPD (DASH) in playlist HLS (m3u8) on-the-fly."""
     _timeline_sequences = {}
+    _live_sequence_clocks = {}
 
     @staticmethod
     def _duration_seconds(value):
@@ -41,6 +42,40 @@ class MPDToHLSConverter:
         while len(self._timeline_sequences) > 512:
             self._timeline_sequences.pop(next(iter(self._timeline_sequences)))
         return mapping[first_timestamp]
+
+    def _sequence_for_live_window(self, key, first_timestamp_sec, common_duration_sec):
+        """Map a no-startNumber DASH window to one shared HLS clock.
+
+        Several live DASH origins omit ``startNumber`` and use independent
+        audio/video timelines. Their segment timestamps can differ by a few
+        milliseconds, and their durations can drift slightly. Numbering each
+        representation from its own timestamp would then produce different
+        HLS media sequences (or a fresh sequence for every reload). A stable
+        per-playback origin plus the common nominal duration keeps alternate
+        renditions aligned while allowing the window to advance one segment.
+        """
+        duration = max(float(common_duration_sec or 0.0), 0.001)
+        clock = self._live_sequence_clocks.get(key)
+        if clock is None:
+            clock = {
+                'origin': float(first_timestamp_sec),
+                'duration': duration,
+            }
+            self._live_sequence_clocks[key] = clock
+        else:
+            # A source restart can move its media timeline backwards. Do not
+            # let an old playback's origin produce negative/huge sequences.
+            if first_timestamp_sec < clock['origin'] - max(clock['duration'] * 8, 60.0):
+                clock['origin'] = float(first_timestamp_sec)
+                clock['duration'] = duration
+            elif abs(clock['duration'] - duration) > max(clock['duration'] * 0.25, 0.5):
+                # Keep the original clock for normal audio/video drift, but
+                # re-anchor if the source clearly changes segment cadence.
+                clock['origin'] = float(first_timestamp_sec)
+                clock['duration'] = duration
+
+        sequence = round((float(first_timestamp_sec) - clock['origin']) / clock['duration'])
+        return max(0, int(sequence))
 
     @staticmethod
     def _sequence_key(original_url, params):
@@ -685,6 +720,7 @@ class MPDToHLSConverter:
                         # is shared between audio/video child playlists.
                         global_last_time_sec = 0.0
                         global_first_time_sec = 0.0
+                        duration_samples_sec = []
                         for period in root.findall('.//mpd:Period', self.ns):
                             for aset in period.findall('mpd:AdaptationSet', self.ns):
                                 mime = aset.get('mimeType', '')
@@ -712,6 +748,8 @@ class MPDToHLSConverter:
                                                         last_t = temp_t
                                                     d = int(s.get('d'))
                                                     r_rep = int(s.get('r', '0'))
+                                                    if d > 0:
+                                                        duration_samples_sec.append(d / r_timescale)
                                                     if last_t is not None:
                                                         last_t += d * r_rep
                                                         last_d = d
@@ -728,6 +766,12 @@ class MPDToHLSConverter:
                             global_last_time_sec = all_segments[-1]['time'] / timescale
                         if global_first_time_sec == 0.0:
                             global_first_time_sec = all_segments[0]['time'] / timescale
+
+                        if duration_samples_sec:
+                            duration_samples_sec.sort()
+                            common_duration_sec = duration_samples_sec[len(duration_samples_sec) // 2]
+                        else:
+                            common_duration_sec = max(seg['duration'] for seg in all_segments)
 
                         window_start_sec = max(global_last_time_sec - 30.0, global_first_time_sec)
                         segments_to_use = [
@@ -747,13 +791,15 @@ class MPDToHLSConverter:
                                 # segments and makes one reload look like two.
                                 media_sequence = int(segments_to_use[0]['number'])
                             else:
-                                # Some MPDs omit startNumber and restart the
-                                # numbering on every snapshot. Preserve the
-                                # HLS sequence by segment timestamp instead.
-                                media_sequence = self._sequence_for_window(
+                                # Some MPDs omit startNumber and expose audio
+                                # and video timelines with slightly different
+                                # timestamps/durations. Use one shared clock;
+                                # per-representation timestamp numbering makes
+                                # iOS alternate playlists drift apart.
+                                media_sequence = self._sequence_for_live_window(
                                     self._sequence_key(original_url, params),
-                                    segments_to_use,
-                                    segments_to_use[0]['time'],
+                                    segments_to_use[0]['time'] / timescale,
+                                    common_duration_sec,
                                 )
                             logger.debug(
                                 f"📐 [Window] rep={rep_id} edge={global_last_time_sec:.1f} "
