@@ -54,7 +54,7 @@ class SyncEngine:
         self.audio = audio
         self.offsets = offsets
         self.routing = RoutingOptions(forced_proxy=proxy.strip() or None)
-        self.sample_seconds = 5
+        self.sample_seconds = 15
         self._downloaded_bytes = 0
         self._download_cache: dict[tuple[str, tuple[tuple[str, str], ...]], Path] = {}
         self._download_locks: dict[tuple[str, tuple[tuple[str, str], ...]], asyncio.Lock] = {}
@@ -221,17 +221,28 @@ class SyncEngine:
             if self._download_cache_dir is not None:
                 digest = hashlib.sha256(repr(key).encode()).hexdigest()
                 target = self._download_cache_dir / f"{digest}.bin"
-            try:
-                content = await self._download_ranged(url, headers)
-            except _RangeDownloadFallback:
-                await self._get(
-                    url,
-                    headers,
-                    destination=target,
-                    max_bytes=self.MAX_MEDIA_BYTES,
-                )
-            else:
-                target.write_bytes(content)
+            last_error: BaseException | None = None
+            for attempt in range(3):
+                try:
+                    try:
+                        content = await self._download_ranged(url, headers)
+                    except _RangeDownloadFallback:
+                        await self._get(
+                            url,
+                            headers,
+                            destination=target,
+                            max_bytes=self.MAX_MEDIA_BYTES,
+                        )
+                    else:
+                        target.write_bytes(content)
+                    last_error = None
+                    break
+                except (RuntimeError, asyncio.TimeoutError) as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        await asyncio.sleep(0.25 * (attempt + 1))
+            if last_error is not None:
+                raise last_error
             if self._download_cache_dir is not None:
                 self._download_cache[key] = target
                 if target != path:
@@ -548,6 +559,41 @@ class SyncEngine:
         return best[1] / 100.0, best[0]
 
     @classmethod
+    def _constant_candidate(
+        cls,
+        measurements: list[dict],
+        minimum: float = SYNC_MIN_CORRELATION,
+    ) -> tuple[float, float, float] | None:
+        """Pick the dominant constant offset, tolerating isolated false peaks.
+
+        Repeated music cues can produce a second, almost equally strong
+        correlation peak at another lag in a single window.  Requiring the
+        majority of the high-confidence samples to agree keeps that outlier
+        from rejecting an otherwise aligned pair.
+        """
+        valid = [
+            item for item in measurements
+            if item and float(item.get("correlation") or 0.0) >= minimum
+        ]
+        if len(valid) < 3:
+            return None
+        offsets = sorted(float(item["offset"]) for item in valid)
+        median = statistics.median(offsets)
+        inliers = [
+            offset for offset in offsets
+            if abs(offset - median) <= cls.SYNC_MAX_DEVIATION
+        ]
+        if len(inliers) < max(3, math.ceil(len(offsets) * 0.6)):
+            return None
+        measured = statistics.median(inliers)
+        deviation = max(abs(offset - measured) for offset in inliers)
+        confidence = min(
+            float(item["correlation"]) for item in valid
+            if abs(float(item["offset"]) - median) <= cls.SYNC_MAX_DEVIATION
+        )
+        return measured, deviation, confidence
+
+    @classmethod
     def _measurement_result(
         cls,
         video_duration: float,
@@ -573,21 +619,24 @@ class SyncEngine:
             item for item in measurements
             if item and float(item.get("correlation") or 0.0) >= cls.SYNC_MIN_CORRELATION
         ]
-        if len(valid) < 3:
-            return result
-
-        measured = statistics.median(float(item["offset"]) for item in valid)
-        deviation = max(abs(float(item["offset"]) - measured) for item in valid)
-        if deviation <= cls.SYNC_MAX_DEVIATION:
+        constant = cls._constant_candidate(measurements)
+        if constant is not None:
+            measured, deviation, confidence = constant
             result.update({
                 "status": "ok",
                 "offset": round(-measured + video_start_time, 3),
                 "rate": 1.0,
-                "confidence": min(float(item["correlation"]) for item in valid),
+                "confidence": confidence,
                 "deviation": deviation,
                 "sync_mode": "constant",
             })
             return result
+        if len(valid) < 3:
+            return result
+
+        median_offset = statistics.median(float(item["offset"]) for item in valid)
+        deviation = max(abs(float(item["offset"]) - median_offset) for item in valid)
+        result["deviation"] = deviation
 
         linear_valid = [
             item for item in valid
@@ -961,28 +1010,26 @@ class SyncEngine:
             )
             await collect(fast_positions)
             logger.info("[DUAL] sync fast samples complete count=%d", len(measurements))
-            fast_valid = [item for item in measurements if item["correlation"] >= .65]
-            if len(fast_valid) >= 3:
-                measured = statistics.median(item["offset"] for item in fast_valid)
-                deviation = max(abs(item["offset"] - measured) for item in fast_valid)
-                if deviation <= .25:
-                    result = {
-                        "status": "ok",
-                        "offset": round(-measured + video_start_time, 3),
-                        "rate": 1.0,
-                        "confidence": min(item["correlation"] for item in fast_valid),
-                        "deviation": deviation,
-                        "sync_mode": "fast",
-                        "video_duration": video_duration,
-                        "audio_duration": audio_duration,
-                        "measurements": measurements,
-                    }
-                    if reference_audio_url:
-                        result["video_start_time"] = round(video_start_time, 3)
-                    if validate_muxed_reference:
-                        result["reference_matches_video"] = bool(reference_matches_video)
-                    result["cache_key"] = cache_key
-                    return result
+            constant = self._constant_candidate(measurements, minimum=0.65)
+            if constant is not None:
+                measured, deviation, confidence = constant
+                result = {
+                    "status": "ok",
+                    "offset": round(-measured + video_start_time, 3),
+                    "rate": 1.0,
+                    "confidence": confidence,
+                    "deviation": deviation,
+                    "sync_mode": "fast",
+                    "video_duration": video_duration,
+                    "audio_duration": audio_duration,
+                    "measurements": measurements,
+                }
+                if reference_audio_url:
+                    result["video_start_time"] = round(video_start_time, 3)
+                if validate_muxed_reference:
+                    result["reference_matches_video"] = bool(reference_matches_video)
+                result["cache_key"] = cache_key
+                return result
 
             logger.info(
                 "[DUAL] sync sampling additional positions=%s",
