@@ -746,12 +746,16 @@ class SyncEngine:
             # Negative sync results are not authoritative: a low-quality sample,
             # a temporary CDN failure, or a provider edition change can produce
             # them. Re-measure instead of returning a permanent 409.
-            missing_reference_validation = (
-                validate_muxed_reference
-                and "reference_matches_video" not in cached_details
-            )
-            if cached_status == "ok" and not missing_reference_validation and not (
-                reference_audio_url and not cached_details.get("video_start_time")
+            # Prefer the reference_matches_video marker; entries written before
+            # the offset API persisted it fall back to video_start_time.
+            reference_validated = cached_details.get("reference_matches_video")
+            if cached_status == "ok" and not (
+                (validate_muxed_reference and reference_validated is False)
+                or (
+                    reference_audio_url
+                    and reference_validated is not True
+                    and "video_start_time" not in cached_details
+                )
             ):
                 result = {"status": "ok", "cached": True, **cached_details}
                 result["cache_key"] = cache_key

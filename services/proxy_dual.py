@@ -478,7 +478,11 @@ class HLSProxyDualMixin:
         reference_audio_url: str,
         validate_muxed_reference: bool,
     ) -> dict | None:
-        """Accept only the same cache entries accepted by SyncEngine."""
+        """Accept only the same cache entries accepted by SyncEngine.
+
+        Prefer the reference_matches_video marker. Entries written before the
+        offset API persisted it fall back to the measured video_start_time.
+        """
         if not isinstance(lookup, dict):
             return None
         details = lookup.get("details") or lookup
@@ -486,9 +490,14 @@ class HLSProxyDualMixin:
             details.get("status") or lookup.get("status") or ""
         ).lower() != "ok":
             return None
-        if validate_muxed_reference and "reference_matches_video" not in details:
+        reference_validated = details.get("reference_matches_video")
+        if validate_muxed_reference and reference_validated is False:
             return None
-        if reference_audio_url and not details.get("video_start_time"):
+        if (
+            reference_audio_url
+            and reference_validated is not True
+            and "video_start_time" not in details
+        ):
             return None
         return {"status": "ok", "cached": True, **details, "cache_key": cache_key}
 
