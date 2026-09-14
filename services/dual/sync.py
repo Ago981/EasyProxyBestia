@@ -7,6 +7,7 @@ import re
 import shutil
 import statistics
 import tempfile
+import time
 from array import array
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -25,6 +26,60 @@ logger = logging.getLogger("easyproxy.dual.sync")
 
 class _RangeDownloadFallback(RuntimeError):
     """The upstream does not support a usable ranged response."""
+
+
+class _AdaptiveHostGate:
+    """Per-host request gate that backs off on CDN throttling and recovers.
+
+    Every CDN throttles at a different request rate, so the limit is learned
+    per host: it halves on the first 429/503 and grows by one after a long run
+    of successes. State is kept on the class and shared by all syncs.
+    """
+
+    def __init__(self, host: str, initial: int = 12, minimum: int = 1, maximum: int = 32):
+        self.host = host
+        self.limit = initial
+        self.minimum = minimum
+        self.maximum = maximum
+        self._in_flight = 0
+        self._successes = 0
+        self._last_throttle = 0.0
+        self._condition = asyncio.Condition()
+
+    async def __aenter__(self):
+        async with self._condition:
+            await self._condition.wait_for(lambda: self._in_flight < self.limit)
+            self._in_flight += 1
+
+    async def __aexit__(self, exc_type, exc, tb):
+        async with self._condition:
+            self._in_flight = max(0, self._in_flight - 1)
+            self._condition.notify()
+
+    async def note_success(self) -> None:
+        async with self._condition:
+            self._successes += 1
+            if self._successes >= 12 and self.limit < self.maximum:
+                self.limit += 1
+                self._successes = 0
+                logger.debug("[DUAL] host gate %s limit=%d", self.host, self.limit)
+
+    async def note_throttle(self) -> None:
+        async with self._condition:
+            now = time.monotonic()
+            # One 503 usually floods the whole burst; a single step down per
+            # incident is enough and repeated notes are ignored briefly.
+            if now - self._last_throttle < 2.0:
+                return
+            self._last_throttle = now
+            self._successes = 0
+            if self.limit > self.minimum:
+                self.limit = max(self.minimum, self.limit // 2)
+                logger.info(
+                    "[DUAL] host gate %s throttled, limit=%d",
+                    self.host,
+                    self.limit,
+                )
 
 
 class _MediaResponse:
@@ -49,6 +104,7 @@ class SyncEngine:
     LINEAR_MAX_DEVIATION = 0.10
     MAX_RATE_DELTA = 0.002
     MAX_END_DEVIATION = 1.5
+    _host_gates: dict[str, "_AdaptiveHostGate"] = {}
 
     def __init__(self, audio: AudioStore, offsets: RemoteOffsetStore, proxy: str = ""):
         self.audio = audio
@@ -74,6 +130,15 @@ class SyncEngine:
         created = create_client_session(proxy, timeout=30)
         self._http_sessions[proxy] = created
         return created
+
+    def _host_limit(self, url: str) -> _AdaptiveHostGate:
+        """Shared per-host gate: probe bursts otherwise trigger CDN 503s."""
+        host = (urlparse(url).hostname or "").lower()
+        gate = self._host_gates.get(host)
+        if gate is None:
+            gate = _AdaptiveHostGate(host)
+            self._host_gates[host] = gate
+        return gate
 
     async def _resolves_publicly_cached(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -125,6 +190,8 @@ class SyncEngine:
                         continue
 
                     if status_code >= 400:
+                        if status_code in (429, 503):
+                            await self._host_limit(current_url).note_throttle()
                         raise RuntimeError(f"media fetch failed: HTTP {status_code}")
                     content_length = response_headers.get("Content-Length")
                     if content_length:
@@ -161,6 +228,7 @@ class SyncEngine:
                             chunks.append(chunk)
                         self._account_bytes(total)
                         content = b"".join(chunks)
+                    await self._host_limit(current_url).note_success()
                     return _MediaResponse(status_code, response_headers, content)
             except asyncio.TimeoutError as exc:
                 raise RuntimeError("media fetch timed out") from exc
@@ -222,25 +290,26 @@ class SyncEngine:
                 digest = hashlib.sha256(repr(key).encode()).hexdigest()
                 target = self._download_cache_dir / f"{digest}.bin"
             last_error: BaseException | None = None
-            for attempt in range(3):
-                try:
+            async with self._host_limit(url):
+                for attempt in range(3):
                     try:
-                        content = await self._download_ranged(url, headers)
-                    except _RangeDownloadFallback:
-                        await self._get(
-                            url,
-                            headers,
-                            destination=target,
-                            max_bytes=self.MAX_MEDIA_BYTES,
-                        )
-                    else:
-                        target.write_bytes(content)
-                    last_error = None
-                    break
-                except (RuntimeError, asyncio.TimeoutError) as exc:
-                    last_error = exc
-                    if attempt < 2:
-                        await asyncio.sleep(0.25 * (attempt + 1))
+                        try:
+                            content = await self._download_ranged(url, headers)
+                        except _RangeDownloadFallback:
+                            await self._get(
+                                url,
+                                headers,
+                                destination=target,
+                                max_bytes=self.MAX_MEDIA_BYTES,
+                            )
+                        else:
+                            target.write_bytes(content)
+                        last_error = None
+                        break
+                    except (RuntimeError, asyncio.TimeoutError) as exc:
+                        last_error = exc
+                        if attempt < 2:
+                            await asyncio.sleep(0.25 * (attempt + 1))
             if last_error is not None:
                 raise last_error
             if self._download_cache_dir is not None:
@@ -839,12 +908,39 @@ class SyncEngine:
             )
             return {"position": position, "lag": lag, "offset": lag, "correlation": correlation}
 
-        async def collect(positions, batch: str = "main"):
-            start_index = len(measurements)
-            measurements.extend(await self._gather_strict(*(
-                collect_one(position, start_index + index, batch)
+        async def collect_batch(positions, batch: str = "main", accept_early: bool = False):
+            """Run every probe in parallel and stop as soon as they agree."""
+            tasks = [
+                asyncio.ensure_future(collect_one(position, index, batch))
                 for index, position in enumerate(positions)
-            )))
+            ]
+            failures: list[BaseException] = []
+            try:
+                for completed in asyncio.as_completed(tasks):
+                    try:
+                        measurements.append(await completed)
+                    except asyncio.CancelledError:
+                        raise
+                    except BaseException as exc:
+                        failures.append(exc)
+                        logger.warning(
+                            "[DUAL] sync sample failed: %s: %s",
+                            type(exc).__name__,
+                            str(exc)[:180],
+                        )
+                        continue
+                    if accept_early:
+                        constant = self._constant_candidate(measurements, minimum=0.65)
+                        if constant is not None:
+                            return constant
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if failures and len(measurements) < 3:
+                raise failures[0]
+            return None
 
         linear_measurements = []
 
@@ -989,7 +1085,6 @@ class SyncEngine:
             common = min(video_duration, reference_duration, audio_duration)
             if common < 90:
                 raise ValueError("media too short")
-            fast_positions = sorted({common * .2, common * .4, common * .8})
             all_positions = sorted({
                 min(60.0, common * .1),
                 common * .2,
@@ -998,9 +1093,6 @@ class SyncEngine:
                 common * .8,
                 max(30.0, common - 90.0),
             })
-            additional_positions = [
-                position for position in all_positions if position not in fast_positions
-            ]
             # Toast syncs against the lowest muxed rendition directly. Do not
             # perform a second high-vs-low media request here: that probe is
             # both unnecessary and vulnerable to transient CDN 429 responses.
@@ -1009,12 +1101,11 @@ class SyncEngine:
             if validate_muxed_reference:
                 reference_matches_video = True
             logger.info(
-                "[DUAL] sync sampling fast positions=%s",
-                ",".join(f"{position:.1f}" for position in fast_positions),
+                "[DUAL] sync sampling positions=%s",
+                ",".join(f"{position:.1f}" for position in all_positions),
             )
-            await collect(fast_positions)
-            logger.info("[DUAL] sync fast samples complete count=%d", len(measurements))
-            constant = self._constant_candidate(measurements, minimum=0.65)
+            constant = await collect_batch(all_positions, "main", accept_early=True)
+            logger.info("[DUAL] sync samples complete count=%d", len(measurements))
             if constant is not None:
                 measured, deviation, confidence = constant
                 result = {
@@ -1035,12 +1126,6 @@ class SyncEngine:
                 result["cache_key"] = cache_key
                 return result
 
-            logger.info(
-                "[DUAL] sync sampling additional positions=%s",
-                ",".join(f"{position:.1f}" for position in additional_positions),
-            )
-            await collect(additional_positions)
-            logger.info("[DUAL] sync additional samples complete count=%d", len(measurements))
             result = self._measurement_result(
                 video_duration,
                 audio_duration,
