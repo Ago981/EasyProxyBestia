@@ -5,7 +5,7 @@ from extractors.base import BaseExtractor, ExtractorError
 
 
 ADS_ORIGIN = "https://altadefinizionestreaming.tv"
-ADS_COOKIE = "sid=32234dfabd14e587764e84405e75e99856c6bef31c6b1752e19897b8ae3d4a21"
+ADS_COOKIE = "sid=518cf65bd4bfc95de0d6d58d186fa39e3417eadd34a4d514e7437fc21b85411e"
 
 
 class ADSExtractor(BaseExtractor):
