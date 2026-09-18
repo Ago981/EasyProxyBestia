@@ -1273,6 +1273,16 @@
 
         const proxyInputs = ['proxyEndpoint', 'destinationUrl', 'requestHeaders', 'proxyRedirectStream', 'proxyBypassWarp', 'proxyBypassProxy', 'proxyDisableSSL', 'proxyNativeMpd', 'proxyMaxRes'];
         const extractorInputs = ['extractorHost', 'extractorUrl', 'extractorExtension', 'extractorRedirectStream', 'extractorBypassWarp', 'extractorBypassProxy', 'extractorDisableSSL', 'extractorMaxRes'];
+
+        function sortSelectOptions(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select || select.options.length < 3) return;
+            const [placeholder, ...options] = Array.from(select.options);
+            options.sort((a, b) => a.textContent.trim().localeCompare(b.textContent.trim()));
+            select.replaceChildren(placeholder, ...options);
+        }
+
+        ['extractorHostSelect', 'dualVideoExtractorSelect', 'dualAudioExtractorSelect'].forEach(sortSelectOptions);
         const dualInputs = ['dualVideoUrl', 'dualVideoExtractor', 'dualVideoExtractorSelect', 'dualAudioUrl', 'dualAudioExtractor', 'dualAudioExtractorSelect', 'dualAudioLanguage', 'dualBypassAudioLanguage', 'dualVideoWarpOff', 'dualVideoProxyOff', 'dualAudioWarpOff', 'dualAudioProxyOff'];
 
         function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

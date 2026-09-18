@@ -512,14 +512,14 @@
         <!-- Max Res (force highest quality) -->
         <div class="card card-wide">
             <h2><span class="icon">🎚️</span> Max Res (force highest quality)</h2>
-            <p class="help-text">Serve only the highest video variant (no adaptive bitrate). The two switches apply <strong>only to direct <code>/proxy/mpd</code> and <code>/proxy/hls</code> requests</strong>; extractor streams are controlled by the per-extractor list below. A per-request <code>max_res=true</code> always works, everywhere.</p>
+            <p class="help-text">Serve only the highest video variant (no adaptive bitrate). The two switches apply <strong>only to direct <code>/proxy/…</code> requests</strong> (the legacy <code>/proxy/manifest.m3u8</code> alias counts as HLS, <code>/proxy/stream</code> by source type); extractor streams are controlled by the per-extractor list below. A per-request <code>max_res=true</code> always works, everywhere.</p>
             <div class="row">
-                <label>Direct <code>/proxy/mpd</code> requests</label>
+                <label>Direct DASH requests (<code>/proxy/mpd/manifest.m3u8</code> and <code>/proxy/mpd/manifest.mpd</code>)</label>
                 <div id="max-res-mpd-toggle" class="toggle" onclick="toggleMaxRes('mpd')"></div>
                 <span id="max-res-mpd-label" class="badge badge-off">OFF</span>
             </div>
             <div class="row">
-                <label>Direct <code>/proxy/hls</code> requests</label>
+                <label>Direct HLS requests (<code>/proxy/hls/manifest.m3u8</code> and <code>/proxy/manifest.m3u8</code>)</label>
                 <div id="max-res-hls-toggle" class="toggle" onclick="toggleMaxRes('hls')"></div>
                 <span id="max-res-hls-label" class="badge badge-off">OFF</span>
             </div>
@@ -807,7 +807,8 @@ async function loadConfig() {
 function renderExtractorProxies() {
     const container = document.getElementById('extractor-proxies-list');
     container.innerHTML = '';
-    for (const [name, entry] of Object.entries(extractorProxies)) {
+    for (const name of Object.keys(extractorProxies).sort((a, b) => a.localeCompare(b))) {
+        const entry = extractorProxies[name];
         let isFile = false, value = '';
         if (typeof entry === 'string') { value = entry; }
         else if (Array.isArray(entry)) { value = entry[0] || ''; }
@@ -828,7 +829,7 @@ function renderExtractorProxies() {
 function populateExtractorSelect(availableExtractors) {
     const sel = document.getElementById('new-extractor-name');
     sel.innerHTML = '<option value="">— Select extractor —</option>';
-    for (const name of availableExtractors) {
+    for (const name of [...availableExtractors].sort((a, b) => a.localeCompare(b))) {
         if (!extractorProxies[name]) {
             const opt = document.createElement('option');
             opt.value = name;
@@ -841,7 +842,7 @@ function populateExtractorSelect(availableExtractors) {
 function renderWarpOffToggles(available, warpOffList) {
     const container = document.getElementById('warp-off-list');
     container.innerHTML = '';
-    for (const name of available) {
+    for (const name of [...available].sort((a, b) => a.localeCompare(b))) {
         const isOff = warpOffList.includes(name);
         const btn = document.createElement('span');
         btn.className = 'warp-off-chip' + (isOff ? ' off' : '');
@@ -864,7 +865,7 @@ function renderWarpOffToggles(available, warpOffList) {
 function renderProxyOffToggles(available, proxyOffList) {
     const container = document.getElementById('proxy-off-list');
     container.innerHTML = '';
-    for (const name of available) {
+    for (const name of [...available].sort((a, b) => a.localeCompare(b))) {
         const isOff = proxyOffList.includes(name);
         const btn = document.createElement('span');
         btn.className = 'warp-off-chip' + (isOff ? ' off' : '');
@@ -887,7 +888,7 @@ function renderProxyOffToggles(available, proxyOffList) {
 function renderMaxResToggles(available, maxResList) {
     const container = document.getElementById('max-res-list');
     container.innerHTML = '';
-    for (const name of available) {
+    for (const name of [...available].sort((a, b) => a.localeCompare(b))) {
         const isOn = maxResList.includes(name);
         const btn = document.createElement('span');
         btn.className = 'warp-off-chip' + (isOn ? '' : ' off');
