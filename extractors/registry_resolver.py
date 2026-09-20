@@ -437,6 +437,17 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                     request_headers, proxies=proxy_list
                 )
             return self.extractors[key]
+        elif (parsed_url.hostname or "").lower().endswith("raiplay.it"):
+            key = _cache_key("raiplay", bypass_warp)
+            proxy = get_proxy_for_url(url, bypass_warp=bypass_warp)
+            proxy_list = _build_proxy_list(proxy, "raiplay")
+            if RaiPlayExtractor is None:
+                raise RuntimeError("RaiPlayExtractor module not available")
+            if key not in self.extractors:
+                self.extractors[key] = RaiPlayExtractor(
+                    request_headers, proxies=proxy_list
+                )
+            return self.extractors[key]
         elif "vavoo.to" in url:
             key = _cache_key("vavoo", bypass_warp)
             proxy = get_proxy_for_url("vavoo.to", bypass_warp=bypass_warp)
