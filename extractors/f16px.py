@@ -6,7 +6,10 @@ import time
 import asyncio
 import os
 import multiprocessing
+import shutil
+import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
 from urllib.parse import urlparse
 
 from Crypto.Hash import SHA256
@@ -154,12 +157,34 @@ def _solve_pow_parallel(
     return None
 
 
+def _solve_pow_node(nonce: str, difficulty: int, timeout: float):
+    """Use the site's native-style JS hash when Node.js is available."""
+    node = shutil.which("node")
+    if not node:
+        return None
+
+    solver = Path(__file__).resolve().parent.parent / "scripts" / "pow_solver.js"
+    try:
+        result = subprocess.run(
+            [node, str(solver), nonce, str(difficulty), str(int(timeout * 1000))],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    solution = result.stdout.strip()
+    return solution or None
+
+
 class F16PxExtractor(BaseExtractor):
     F16PX_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"
     # Covers the sequential API calls, a slower PoW solve, and playback.
     REQUEST_TIMEOUT_TOTAL = 180
     POW_TIMEOUT_SECONDS = 120
-    POW_MAX_WORKERS = 8
+    POW_MAX_WORKERS = 4  # fallback only; Node/V8 is the primary solver
     ERROR_PREFIX = "F16PX"
 
     def __init__(self, request_headers: dict, proxies: list = None):
@@ -340,12 +365,20 @@ class F16PxExtractor(BaseExtractor):
             loop = asyncio.get_event_loop()
             solution = await loop.run_in_executor(
                 None,
-                _solve_pow_parallel,
+                _solve_pow_node,
                 pow_nonce,
                 pow_difficulty,
                 self.POW_TIMEOUT_SECONDS,
-                self.POW_MAX_WORKERS,
             )
+            if solution is None:
+                solution = await loop.run_in_executor(
+                    None,
+                    _solve_pow_parallel,
+                    pow_nonce,
+                    pow_difficulty,
+                    self.POW_TIMEOUT_SECONDS,
+                    self.POW_MAX_WORKERS,
+                )
             if solution is None:
                 raise self._error("PoW solve timed out")
 
