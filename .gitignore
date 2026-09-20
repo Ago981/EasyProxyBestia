@@ -22,3 +22,4 @@ config.json
 /data-test-warp/
 /.pytest_cache/
 /tests
+/output
