@@ -33,8 +33,7 @@ def _parse_e_expiry(url: str) -> float | None:
     except Exception:
         return None
 
-# Default playback domain for headers (Referer/Origin). Can be overridden
-# via the `vd_domain=` query parameter forwarded by the addon.
+# Hardcoded playback domain for CDN Referer/Origin headers.
 DEFAULT_PLAYBACK_DOMAIN = "https://v.vidxgo.co"
 
 # Header used during the embed page fetch. The site is currently strict about
@@ -127,14 +126,6 @@ class VidXgoExtractor:
             bypass_warp=bypass_warp,
         )
 
-    @staticmethod
-    def _header_value(headers: dict | None, name: str) -> str:
-        wanted = name.lower()
-        for key, value in (headers or {}).items():
-            if str(key).lower() == wanted:
-                return str(value or "")
-        return ""
-
     # ------------------------------------------------------------------ fetch
 
     async def _get_curl_session(self, proxy_url=None, impersonate="chrome124"):
@@ -157,7 +148,7 @@ class VidXgoExtractor:
         return self._curl_session
 
     async def _fetch(self, url: str, headers: dict, bypass_warp: bool = False) -> str:
-        """GET `url`; ruota i Referer whitelistati se necessario."""
+        """GET `url` through the configured network routes."""
         paths = self._get_proxies_for_url(url, bypass_warp=bypass_warp)
         if should_allow_direct_fallback(paths, bypass_warp=bypass_warp):
             paths.append(None)
@@ -266,14 +257,7 @@ class VidXgoExtractor:
         background_refresh = bool(kwargs.get("background_refresh"))
         request_headers = kwargs.get("request_headers") or {}
 
-        vd_domain = (
-            kwargs.get("vd_domain")
-            or kwargs.get("h_referer")
-            or DEFAULT_PLAYBACK_DOMAIN
-        )
-        vd_domain = vd_domain.rstrip("/")
-        if not vd_domain.startswith("http"):
-            vd_domain = f"https://{vd_domain}"
+        vd_domain = DEFAULT_PLAYBACK_DOMAIN
         playback_headers = {
             **self.playback_headers,
             "referer": f"{vd_domain}/",
@@ -283,23 +267,6 @@ class VidXgoExtractor:
         bypass_warp = bool(kwargs.get("bypass_warp"))
         # 1. Fetch embed page.
         embed_headers = {**self.embed_headers, **{k.lower(): v for k, v in request_headers.items() if k.lower() == "cookie"}}
-        source_referer = (
-            self._header_value(request_headers, "Referer")
-            or str(
-                kwargs.get("embed_referer")
-                or kwargs.get("source_referer")
-                or kwargs.get("h_referer")
-                or ""
-            ).strip()
-            or self._header_value(self.request_headers, "Referer")
-        )
-        if source_referer:
-            embed_headers["referer"] = source_referer
-            source_host = urlparse(source_referer).hostname
-            target_host = urlparse(url).hostname
-            embed_headers["sec-fetch-site"] = (
-                "same-origin" if source_host and source_host == target_host else "cross-site"
-            )
         html = await self._fetch(url, embed_headers, bypass_warp=bypass_warp)
         if not html:
             raise ExtractorError(f"VidXgo: empty embed page for {url}")
