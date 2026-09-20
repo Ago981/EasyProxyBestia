@@ -515,7 +515,6 @@ class HLSProxyExtractorHandlerMixin:
 
         except Exception as e:
             error_message = str(e).lower()
-            is_site_down = bool(getattr(e, "site_down", False))
             # Per errori attesi (video non trovato, servizio non disponibile), non stampare il traceback
             is_expected_error = any(
                 x in error_message
@@ -533,7 +532,7 @@ class HLSProxyExtractorHandlerMixin:
                     "expired",
                     "no longer available",
                 ]
-            ) or isinstance(e, (asyncio.TimeoutError, asyncio.CancelledError)) or type(e).__name__ == "ExtractorError" or is_site_down  # ponytail: expected extractor failures shouldn't print a traceback
+            ) or isinstance(e, (asyncio.TimeoutError, asyncio.CancelledError)) or type(e).__name__ == "ExtractorError"  # ponytail: expected extractor failures shouldn't print a traceback
 
             error_desc = str(e) or type(e).__name__
             log_proxy = selected_proxy or (
@@ -551,13 +550,7 @@ class HLSProxyExtractorHandlerMixin:
             if isinstance(e, asyncio.CancelledError):
                 logger.info("Extractor request cancelled (client disconnected) [%s]", error_context)
                 raise
-            if is_site_down:
-                logger.warning(
-                    "⚠️ Extractor site down: %s [%s]",
-                    error_desc,
-                    error_context,
-                )
-            elif is_expected_error:
+            if is_expected_error:
                 logger.error(
                     "❌ Extractor request failed: %s [%s]",
                     error_desc,
@@ -573,14 +566,11 @@ class HLSProxyExtractorHandlerMixin:
                 traceback.print_exc()
 
             status_code = 500
-            response_status = "site_down" if is_site_down else "error"
-            if is_site_down:
-                status_code = 503
-            elif type(e).__name__ == "ExtractorError" or "not found" in error_message or "pick failed" in error_message:
+            if type(e).__name__ == "ExtractorError" or "not found" in error_message or "pick failed" in error_message:
                 status_code = 404
 
             return web.json_response(
-                {"error": error_desc, "status": response_status},
+                {"error": error_desc, "status": "error"},
                 status=status_code
             )
         finally:

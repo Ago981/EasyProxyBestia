@@ -21,20 +21,6 @@ class ExtractorError(Exception):
     pass
 
 
-class VidXgoSiteDownError(ExtractorError):
-    site_down = True
-
-
-SITE_DOWN_RE = re.compile(
-    r"stiamo\s+lavorando\s*,\s*torniamo\s+presto",
-    re.IGNORECASE,
-)
-
-
-def _is_site_down_page(body: str) -> bool:
-    return bool(SITE_DOWN_RE.search(" ".join((body or "").split())))
-
-
 
 def _parse_e_expiry(url: str) -> float | None:
     """Extract the `e=` ms-epoch param from a signed VidXgo CDN URL."""
@@ -173,7 +159,6 @@ class VidXgoExtractor:
             if key.lower() != "user-agent"
         }
         last_error = None
-        site_down_error = None
         for proxy in paths:
             proxy_url = self._normalize_proxy_url(proxy) if proxy else None
             request_kwargs = {
@@ -194,23 +179,11 @@ class VidXgoExtractor:
                     raise ExtractorError(
                         f"curl_cffi HTTP {resp.status_code} via {proxy_url or 'direct'}"
                     )
-                if _is_site_down_page(resp.text):
-                    site_down_error = VidXgoSiteDownError(
-                        f"VidXgo site down via {proxy_url or 'direct'}"
-                    )
-                    logger.warning(
-                        "VidXgo site down page received via %s: %s",
-                        proxy_url or "direct",
-                        url,
-                    )
-                    continue
                 self.selected_proxy = proxy_url
                 return resp.text
             except Exception as e:
                 last_error = e
                 logger.debug(f"vidxgo curl fetch failed via {proxy_url or 'direct'}: {e}")
-        if site_down_error is not None:
-            raise site_down_error
         raise ExtractorError(f"VidXgo: fetch failed for {url}: {last_error}")
 
     # ------------------------------------------------------------------ decode
