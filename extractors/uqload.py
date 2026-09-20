@@ -90,7 +90,43 @@ class UqloadExtractor(BaseExtractor):
         ):
             raise ExtractorError(f"Uqload video removed/not found: {url}")
 
-        video_url = self._extract_source(text, final_url or url)
+        source_base = final_url or url
+        video_url = self._extract_source(text, source_base)
+
+        # Current Uqload /e/<code> pages keep the player source behind the
+        # browser's POST to /dl; the embed HTML only contains the play button.
+        if not video_url:
+            parsed = urlparse(source_base)
+            file_code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+            file_code = re.sub(r"\.html$", "", file_code, flags=re.IGNORECASE)
+            file_code = file_code.rsplit("-", 1)[-1]
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            if file_code and parsed.scheme and parsed.netloc:
+                post_headers = dict(self.BROWSER_HEADERS)
+                post_headers.update(
+                    {
+                        "Accept": "*/*",
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "Origin": origin,
+                        "Referer": source_base,
+                        "X-Requested-With": "XMLHttpRequest",
+                    }
+                )
+                post_response = await self._make_request(
+                    f"{origin}/dl",
+                    method="POST",
+                    headers=post_headers,
+                    data={
+                        "op": "embed",
+                        "file_code": file_code,
+                        "auto": "1",
+                        "referer": self.request_headers.get("Referer", ""),
+                    },
+                )
+                video_url = self._extract_source(
+                    post_response.text,
+                    post_response.url or source_base,
+                )
         if video_url:
             logger.debug(f"[Uqload] Extracted source: {video_url[:80]}...")
 
