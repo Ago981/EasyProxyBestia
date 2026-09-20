@@ -66,6 +66,7 @@ class VidXgoExtractor:
         self.selected_proxy = None
         self.session = None
         self._curl_session = None
+        self._curl_impersonate = None
         self.mediaflow_endpoint = "hls_proxy"
 
         # Headers used for fetching the embed page.
@@ -126,20 +127,31 @@ class VidXgoExtractor:
             bypass_warp=bypass_warp,
         )
 
+    @staticmethod
+    def _header_value(headers: dict | None, name: str) -> str:
+        wanted = name.lower()
+        for key, value in (headers or {}).items():
+            if str(key).lower() == wanted:
+                return str(value or "")
+        return ""
+
     # ------------------------------------------------------------------ fetch
 
-    async def _get_curl_session(self, proxy_url=None):
+    async def _get_curl_session(self, proxy_url=None, impersonate="chrome124"):
         """Reuse the curl_cffi connection pool during one extraction."""
         curl_options = _cfg.get_curl_ipv4_options(proxy_url).get("curl_options") or {}
-        if self._curl_session is None:
+        if self._curl_session is None or self._curl_impersonate != impersonate:
+            if self._curl_session is not None:
+                await self._curl_session.close()
             try:
                 from curl_cffi.requests import AsyncSession as CurlAsyncSession
             except ImportError as exc:
                 raise ExtractorError("VidXgo: curl_cffi is required") from exc
             self._curl_session = CurlAsyncSession(
-                impersonate="chrome124",
+                impersonate=impersonate,
                 curl_options=curl_options,
             )
+            self._curl_impersonate = impersonate
         else:
             self._curl_session.curl_options = curl_options
         return self._curl_session
@@ -159,31 +171,45 @@ class VidXgoExtractor:
             if key.lower() != "user-agent"
         }
         last_error = None
-        for proxy in paths:
-            proxy_url = self._normalize_proxy_url(proxy) if proxy else None
-            request_kwargs = {
-                "proxies": {"http": proxy_url, "https": proxy_url}
-            } if proxy_url else {}
-            try:
-                logger.info("vidxgo curl fetch via %s for %s", proxy_url or "direct", url)
-                session = await self._get_curl_session(proxy_url)
-                resp = await session.get(
-                    url,
-                    headers=curl_headers,
-                    timeout=25,
-                    verify=False,
-                    allow_redirects=True,
-                    **request_kwargs,
-                )
-                if not 200 <= resp.status_code < 300:
-                    raise ExtractorError(
+        for impersonate in ("chrome131", "chrome124", "chrome120"):
+            for proxy in paths:
+                proxy_url = self._normalize_proxy_url(proxy) if proxy else None
+                request_kwargs = {
+                    "proxies": {"http": proxy_url, "https": proxy_url}
+                } if proxy_url else {}
+                try:
+                    logger.info(
+                        "vidxgo curl fetch via %s for %s (imp=%s)",
+                        proxy_url or "direct",
+                        url,
+                        impersonate,
+                    )
+                    session = await self._get_curl_session(proxy_url, impersonate)
+                    resp = await session.get(
+                        url,
+                        headers=curl_headers,
+                        timeout=25,
+                        verify=False,
+                        allow_redirects=True,
+                        **request_kwargs,
+                    )
+                    if 200 <= resp.status_code < 300:
+                        self.selected_proxy = proxy_url
+                        return resp.text
+                    last_error = ExtractorError(
                         f"curl_cffi HTTP {resp.status_code} via {proxy_url or 'direct'}"
                     )
-                self.selected_proxy = proxy_url
-                return resp.text
-            except Exception as e:
-                last_error = e
-                logger.debug(f"vidxgo curl fetch failed via {proxy_url or 'direct'}: {e}")
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        "vidxgo curl fetch failed via %s (imp=%s): %s",
+                        proxy_url or "direct",
+                        impersonate,
+                        e,
+                    )
+
+        if last_error:
+            raise ExtractorError(f"VidXgo: fetch failed for {url}: {last_error}")
         raise ExtractorError(f"VidXgo: fetch failed for {url}: {last_error}")
 
     # ------------------------------------------------------------------ decode
@@ -257,6 +283,23 @@ class VidXgoExtractor:
         bypass_warp = bool(kwargs.get("bypass_warp"))
         # 1. Fetch embed page.
         embed_headers = {**self.embed_headers, **{k.lower(): v for k, v in request_headers.items() if k.lower() == "cookie"}}
+        source_referer = (
+            self._header_value(request_headers, "Referer")
+            or str(
+                kwargs.get("embed_referer")
+                or kwargs.get("source_referer")
+                or kwargs.get("h_referer")
+                or ""
+            ).strip()
+            or self._header_value(self.request_headers, "Referer")
+        )
+        if source_referer:
+            embed_headers["referer"] = source_referer
+            source_host = urlparse(source_referer).hostname
+            target_host = urlparse(url).hostname
+            embed_headers["sec-fetch-site"] = (
+                "same-origin" if source_host and source_host == target_host else "cross-site"
+            )
         html = await self._fetch(url, embed_headers, bypass_warp=bypass_warp)
         if not html:
             raise ExtractorError(f"VidXgo: empty embed page for {url}")
@@ -327,5 +370,6 @@ class VidXgoExtractor:
             except Exception:
                 pass
             self._curl_session = None
+            self._curl_impersonate = None
         if self.session and not self.session.closed:
             await self.session.close()
