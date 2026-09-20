@@ -99,7 +99,10 @@ class VidFastExtractor:
             raise ExtractorError(
                 f"VidFast: failed to create HTTP bridge for proxy ({proxy})"
             )
-        self.last_used_proxy = runner_proxy
+        # The HTTP bridge is only for the Node runner. Return the original
+        # route for media requests so later HLS segments do not depend on a
+        # short-lived localhost bridge port.
+        self.last_used_proxy = proxy
 
         env = dict(os.environ)
         # Node's native fetch supports HTTP(S) ProxyAgent when undici is
