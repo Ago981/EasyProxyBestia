@@ -111,6 +111,14 @@ class VidFastExtractor:
             env["VIDFAST_PROXY"] = str(runner_proxy)
         else:
             env.pop("VIDFAST_PROXY", None)
+        try:
+            required_resolution = int(kwargs.get("required_resolution") or 0)
+        except (TypeError, ValueError):
+            required_resolution = 0
+        if required_resolution > 0:
+            env["VIDFAST_MIN_HEIGHT"] = str(required_resolution)
+        else:
+            env.pop("VIDFAST_MIN_HEIGHT", None)
         if kwargs.get("background_refresh") or kwargs.get("force_refresh"):
             env["VIDFAST_DEBUG"] = "1"
 
