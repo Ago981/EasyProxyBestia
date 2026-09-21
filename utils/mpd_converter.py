@@ -22,6 +22,48 @@ class MPDToHLSConverter:
             raise ValueError('Unsupported MPD duration')
         return sum(float(item or 0) * factor for item, factor in zip(match.groups(), (86400, 3600, 60, 1)))
 
+    def _period_length_seconds(self, root, period):
+        """Playlist span of one Period, derived the way DASH defines it.
+
+        ``Period@duration`` wins when present.  Otherwise a Period ends where
+        the next one starts, and the final Period ends at
+        ``mediaPresentationDuration``.  A single-Period VOD manifest only ever
+        declares the last of those, so consulting ``Period@duration`` alone
+        reported no duration at all for those streams.
+        """
+        if period is not None:
+            declared = period.get('duration')
+            if declared:
+                try:
+                    return max(0.0, self._duration_seconds(declared))
+                except ValueError:
+                    pass
+
+        start_sec = 0.0
+        end_sec = 0.0
+        periods = root.findall('.//mpd:Period', self.ns)
+        if period is not None and period in periods:
+            try:
+                start_sec = self._duration_seconds(period.get('start', 'PT0S'))
+            except ValueError:
+                start_sec = 0.0
+            following = periods[periods.index(period) + 1:]
+            if following:
+                try:
+                    end_sec = self._duration_seconds(following[0].get('start', 'PT0S'))
+                except ValueError:
+                    end_sec = 0.0
+
+        if end_sec <= start_sec:
+            presentation = root.get('mediaPresentationDuration')
+            if presentation:
+                try:
+                    end_sec = self._duration_seconds(presentation)
+                except ValueError:
+                    end_sec = 0.0
+
+        return max(0.0, end_sec - start_sec)
+
     def _sequence_for_window(self, key, segments, first_timestamp):
         """Keep overlapping DASH segments at the same HLS sequence on reload."""
         previous = self._timeline_sequences.get(key, {})
@@ -881,7 +923,6 @@ class MPDToHLSConverter:
                     )
                     if period is None:
                         period = root.find('mpd:Period', self.ns)
-                    period_duration_str = period.get('duration') if period is not None else None
 
                     if is_live:
                         # A dynamic MPD with @duration carries no SegmentTimeline,
@@ -957,16 +998,18 @@ class MPDToHLSConverter:
                             f"seq={media_sequence}"
                         )
                     else:
-                        # VOD: the period duration bounds the list when declared,
-                        # otherwise keep the historical 100-segment default.
-                        total_segments = 100
-                        if period_duration_str:
-                            try:
-                                period_sec = self._duration_seconds(period_duration_str)
-                            except ValueError:
-                                period_sec = 0.0
-                            if period_sec > 0:
-                                total_segments = max(1, int(period_sec / duration_sec))
+                        # VOD: the list has to span the whole asset.  A
+                        # single-Period manifest declares that only as
+                        # mediaPresentationDuration on the MPD root, so reading
+                        # Period@duration alone found nothing and fell back to a
+                        # fixed 100 segments: a 634s film at 4s/segment needs 159,
+                        # so players reported 400s and the final third of the
+                        # asset was never listed.
+                        period_length_sec = self._period_length_seconds(root, period)
+                        total_segments = (
+                            max(1, int(math.ceil(period_length_sec / duration_sec)))
+                            if period_length_sec > 0 else 100
+                        )
                         segment_numbers = [start_number + i for i in range(total_segments)]
                         media_sequence = 0
 
