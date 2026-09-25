@@ -139,6 +139,32 @@ async def _control_command(reader, writer, command: str) -> None:
     raise TorError("Unexpected Tor control response")
 
 
+def _log_tail(lines: int = 24) -> str:
+    try:
+        with open(TOR_LOG_PATH, "r", encoding="utf-8", errors="replace") as handle:
+            content = "".join(handle.readlines()[-lines:]).strip()
+    except OSError:
+        return "No Tor log output."
+    return content or "No Tor log output."
+
+
+async def _terminate(process: asyncio.subprocess.Process | None) -> None:
+    if not process or process.returncode is not None:
+        return
+    try:
+        process.send_signal(signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), timeout=10)
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            return
+        await process.wait()
+
+
 async def new_identity() -> None:
     """Ask Tor for a new circuit while keeping automatic rotation disabled."""
     if _pid() is None:
@@ -163,42 +189,53 @@ async def new_identity() -> None:
 async def start() -> None:
     global _process
     async with _lock:
-        if _process and _process.returncode is None:
-            return
+        if _process is not None:
+            if _process.returncode is None:
+                return
+            _process = None
         if not available():
             raise TorError("Tor is not installed; use the EasyProxy Docker image")
         set_bind(get_bind())
         _write_torrc()
-        _process = await asyncio.create_subprocess_exec(
+        process = await asyncio.create_subprocess_exec(
             "tor", "-f", TORRC_PATH, "--RunAsDaemon", "0",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
+        _process = process
         host, port = _split_bind(get_bind())
         deadline = time.monotonic() + TOR_BOOTSTRAP_TIMEOUT
-        while time.monotonic() < deadline:
-            if _process.returncode is not None:
-                raise TorError("Tor exited during startup; inspect Tor logs")
-            if await _port_ready(host, port):
-                logger.info("Tor SOCKS5 ready on %s:%s", host, port)
-                return
-            await asyncio.sleep(1)
-        await stop()
-        raise TorError("Tor did not open its SOCKS5 port in time")
+        ready = False
+        try:
+            while time.monotonic() < deadline:
+                if process.returncode is not None:
+                    detail = _log_tail()
+                    raise TorError(
+                        f"Tor exited during startup (code {process.returncode}): {detail}"
+                    )
+                if await _port_ready(host, port):
+                    logger.info("Tor SOCKS5 ready on %s:%s", host, port)
+                    ready = True
+                    return
+                await asyncio.sleep(1)
+            raise TorError(
+                f"Tor did not open its SOCKS5 port in time: {_log_tail()}"
+            )
+        finally:
+            if not ready:
+                if _process is process:
+                    _process = None
+                await _terminate(process)
+            elif _process is process and process.returncode is not None:
+                _process = None
 
 
 async def stop() -> None:
     global _process
-    process = _process
-    _process = None
-    if not process or process.returncode is not None:
-        return
-    process.send_signal(signal.SIGTERM)
-    try:
-        await asyncio.wait_for(process.wait(), timeout=10)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+    async with _lock:
+        process = _process
+        _process = None
+        await _terminate(process)
 
 
 async def restart() -> None:
@@ -230,11 +267,7 @@ async def check() -> dict:
 
 
 async def logs(lines: int = 120) -> str:
-    try:
-        with open(TOR_LOG_PATH, "r", encoding="utf-8", errors="replace") as handle:
-            return "".join(handle.readlines()[-lines:])
-    except OSError:
-        return "No Tor log output."
+    return _log_tail(lines)
 
 
 async def status(with_probe: bool = False) -> dict:
