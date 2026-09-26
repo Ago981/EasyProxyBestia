@@ -142,12 +142,12 @@ Tor is installed in the Docker image and starts only after enabling it from
 `/admin/torproxy`. Automatic circuit rotation is disabled as far as Tor allows
 (30-day maximum circuit lifetime); use **Request new IP** for manual `NEWNYM`.
 An exit can still change after a failure or process restart. The panel includes
-start/stop, manual identity change, Tor egress check and logs. The exit can be
-pinned to a country with Tor codes (`{it}` for Italy, `{de}`, `{fr}`, ...) or a
-relay fingerprint from **Exit node / country**; comma-separate for multiple.
-**Request new IP** keeps a country selection and rotates within it. Tor is
-TCP-only and should normally be used on selected routes rather than as the
-default for all streaming traffic.
+start/stop, manual identity change, Tor egress check and logs. **Exit country**
+is a list loaded live from Tor (onionoo) with only the countries currently
+running exit relays; pick one to pin the exit to that country. **Request new
+IP** keeps a country selection and rotates within it. Tor is TCP-only and
+should normally be used on selected routes rather than as the default for all
+streaming traffic.
 
 In the Admin Panel speed test, **Direct** uses Ookla. Every proxy route uses a
 real SOCKS5/HTTP proxied TCP throughput test, shows the egress IP, and does not
