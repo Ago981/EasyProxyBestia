@@ -23,11 +23,12 @@ TOR_LOG_PATH = os.path.join(TOR_DATA_DIR, "tor.log")
 TOR_CHECK_URL = "https://check.torproject.org/api/ip"
 TOR_CONTROL_HOST = "127.0.0.1"
 TOR_CONTROL_PORT = 9051
-TOR_BOOTSTRAP_TIMEOUT = 60
+TOR_BOOTSTRAP_TIMEOUT = 90
 TOR_MAX_CIRCUIT_DIRTINESS = "30 days"
 
 _BIND_RE = re.compile(r"^(?P<host>[A-Za-z0-9_.\-\[\]:]+):(?P<port>\d{1,5})$")
 _process: asyncio.subprocess.Process | None = None
+_bootstrap_level: int | None = None
 _lock = asyncio.Lock()
 
 
@@ -351,6 +352,28 @@ async def new_identity() -> None:
     await restart()
 
 
+async def apply_exit_nodes(value: str) -> None:
+    """Apply an exit selection, rolling back to the previous one on failure.
+
+    A country can be unreachable from the current network: with StrictNodes,
+    Tor then never finishes bootstrapping. Restoring the previous selection
+    keeps a working Tor instead of leaving it stopped.
+    """
+    previous = get_exit_nodes()
+    set_exit_nodes(value)
+    try:
+        await restart()
+    except TorError as exc:
+        set_exit_nodes(previous)
+        message = str(exc)
+        try:
+            await start()
+            message += "; previous exit selection restored"
+        except TorError as rollback_exc:
+            message += f"; rollback failed: {rollback_exc}"
+        raise TorError(message) from exc
+
+
 async def _pin_current_exit() -> None:
     """Pin the exit Tor is currently using, then rebuild every circuit on it."""
     fingerprint = await current_exit_fingerprint()
@@ -359,7 +382,7 @@ async def _pin_current_exit() -> None:
 
 
 async def _start() -> None:
-    global _process
+    global _process, _bootstrap_level
     async with _lock:
         if _process is not None:
             if _process.returncode is None:
@@ -376,6 +399,7 @@ async def _start() -> None:
             stderr=asyncio.subprocess.PIPE,
         )
         _process = process
+        _bootstrap_level = None
         host, port = _split_bind(get_bind())
         deadline = time.monotonic() + TOR_BOOTSTRAP_TIMEOUT
         ready = False
@@ -387,14 +411,19 @@ async def _start() -> None:
                     raise TorError(
                         f"Tor exited during startup (code {process.returncode}): {detail or 'no Tor output'}"
                     )
-                if await _port_ready(host, port) and await _bootstrap_progress() == 100:
-                    logger.info("Tor SOCKS5 ready and bootstrapped on %s:%s", host, port)
-                    ready = True
-                    return
+                if await _port_ready(host, port):
+                    level = await _bootstrap_progress()
+                    if level is not None:
+                        _bootstrap_level = level
+                    if level == 100:
+                        logger.info("Tor SOCKS5 ready and bootstrapped on %s:%s", host, port)
+                        ready = True
+                        return
                 await asyncio.sleep(1)
             raise TorError(f"Tor did not bootstrap in time: {_log_tail()}")
         finally:
             if not ready:
+                _bootstrap_level = None
                 if _process is process:
                     _process = None
                 await _terminate(process)
@@ -413,10 +442,11 @@ async def start() -> None:
 
 
 async def stop() -> None:
-    global _process
+    global _process, _bootstrap_level
     async with _lock:
         process = _process
         _process = None
+        _bootstrap_level = None
         await _terminate(process)
 
 
@@ -492,6 +522,7 @@ async def status(with_probe: bool = False) -> dict:
         "available": available(),
         "automatic_rotation": False,
         "exit_nodes": get_exit_nodes(),
+        "bootstrap": _bootstrap_level,
         "probe_ip": "",
     }
     if with_probe and data["running"]:
@@ -527,6 +558,6 @@ async def keepalive_loop(interval: float = 30.0) -> None:
 
 __all__ = [
     "TorError", "available", "get_bind", "set_bind", "is_enabled", "set_enabled",
-    "get_exit_nodes", "set_exit_nodes", "current_exit_fingerprint",
+    "get_exit_nodes", "set_exit_nodes", "apply_exit_nodes", "current_exit_fingerprint",
     "start", "stop", "restart", "new_identity", "check", "logs", "status", "keepalive_loop",
 ]

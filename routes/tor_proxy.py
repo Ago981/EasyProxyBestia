@@ -72,9 +72,11 @@ def setup_tor_proxy_routes(app: web.Application) -> None:
             return _unauthorized()
         try:
             payload = await request.json()
-            tor_proxy.set_exit_nodes(str(payload.get("exit_nodes", "")))
+            value = str(payload.get("exit_nodes", ""))
             if tor_proxy.is_enabled():
-                await tor_proxy.restart()
+                await tor_proxy.apply_exit_nodes(value)
+            else:
+                tor_proxy.set_exit_nodes(value)
             return _json({"status": "ok", "tor": await tor_proxy.status()})
         except tor_proxy.TorError as exc:
             return _json({"error": str(exc)}, status=400)
