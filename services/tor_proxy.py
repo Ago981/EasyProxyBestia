@@ -499,10 +499,17 @@ async def _start() -> None:
                         output = await _process_output(process)
                         detail = " | ".join(part for part in (output, _log_tail()) if part and part != "No Tor log output.")
                         # A previous container/app instance may still be shutting
-                        # down and holding the data directory lock.
-                        if "same data directory" in detail and time.monotonic() + 5 < deadline:
+                        # down and hold the ports or the data directory lock.
+                        stale_instance = any(
+                            marker in detail
+                            for marker in (
+                                "same data directory",
+                                "Address already in use. Is Tor already running?",
+                            )
+                        )
+                        if stale_instance and time.monotonic() + 5 < deadline:
                             logger.warning(
-                                "Another Tor instance still holds %s; retrying in 5s", TOR_DATA_DIR
+                                "Another Tor instance is still shutting down; retrying in 5s"
                             )
                             await asyncio.sleep(5)
                             respawn = True
