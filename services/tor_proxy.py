@@ -295,6 +295,17 @@ async def _bootstrap_progress() -> int | None:
             pass
 
 
+async def _control_pid() -> int | None:
+    """Return the PID of the Tor process serving the control port."""
+    try:
+        for line in await _control_lines("GETINFO process/pid"):
+            if line.startswith("process/pid="):
+                return int(line.split("=", 1)[1])
+    except (TorError, ValueError):
+        return None
+    return None
+
+
 def _log_tail(lines: int = 24) -> str:
     try:
         with open(TOR_LOG_PATH, "r", encoding="utf-8", errors="replace") as handle:
@@ -468,33 +479,50 @@ async def _start() -> None:
         set_bind(get_bind())
         _write_torrc()
         await _verify_config()
-        process = await asyncio.create_subprocess_exec(
-            "tor", "-f", TORRC_PATH, "--RunAsDaemon", "0",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _process = process
-        _bootstrap_level = None
         host, port = _split_bind(get_bind())
         deadline = time.monotonic() + TOR_BOOTSTRAP_TIMEOUT
         ready = False
+        process = None
         try:
             while time.monotonic() < deadline:
-                if process.returncode is not None:
-                    output = await _process_output(process)
-                    detail = " | ".join(part for part in (output, _log_tail()) if part and part != "No Tor log output.")
-                    raise TorError(
-                        f"Tor exited during startup (code {process.returncode}): {detail or 'no Tor output'}"
-                    )
-                if await _port_ready(host, port):
-                    level = await _bootstrap_progress()
-                    if level is not None:
-                        _bootstrap_level = level
-                    if level == 100:
-                        logger.info("Tor SOCKS5 ready and bootstrapped on %s:%s", host, port)
-                        ready = True
-                        return
-                await asyncio.sleep(1)
+                process = await asyncio.create_subprocess_exec(
+                    "tor", "-f", TORRC_PATH, "--RunAsDaemon", "0",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _process = process
+                _bootstrap_level = None
+                respawn = False
+                while time.monotonic() < deadline:
+                    if process.returncode is not None:
+                        _process = None
+                        output = await _process_output(process)
+                        detail = " | ".join(part for part in (output, _log_tail()) if part and part != "No Tor log output.")
+                        # A previous container/app instance may still be shutting
+                        # down and holding the data directory lock.
+                        if "same data directory" in detail and time.monotonic() + 5 < deadline:
+                            logger.warning(
+                                "Another Tor instance still holds %s; retrying in 5s", TOR_DATA_DIR
+                            )
+                            await asyncio.sleep(5)
+                            respawn = True
+                            break
+                        raise TorError(
+                            f"Tor exited during startup (code {process.returncode}): {detail or 'no Tor output'}"
+                        )
+                    if await _port_ready(host, port):
+                        level = await _bootstrap_progress()
+                        if level is not None:
+                            _bootstrap_level = level
+                        # A dying/foreign Tor instance can hold the ports while
+                        # ours waits on the data directory lock.
+                        if level == 100 and await _control_pid() == process.pid:
+                            logger.info("Tor SOCKS5 ready and bootstrapped on %s:%s", host, port)
+                            ready = True
+                            return
+                    await asyncio.sleep(1)
+                if not respawn:
+                    break
             raise TorError(f"Tor did not bootstrap in time: {_log_tail()}")
         finally:
             if not ready:
