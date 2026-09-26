@@ -334,15 +334,19 @@ async def _verify_config() -> None:
 
 
 async def new_identity() -> None:
-    """Switch to a fresh exit; the new relay is then pinned automatically.
+    """Switch to a fresh exit, keeping any country/set selection.
 
-    A restart is required: SIGNAL NEWNYM alone leaves the old circuits alive
+    A single-relay pin (fingerprint or nickname) is released first so the
+    restart can pick a different relay; country (`{it}`) or comma-separated
+    selections are kept, so the new exit still matches them. A restart is
+    required: SIGNAL NEWNYM alone leaves the old circuits alive
     (MaxCircuitDirtiness is 30 days) and they keep serving new streams, so the
     previous IP can come back.
     """
     if _pid() is None:
         raise TorError("Tor is not running")
-    if get_exit_nodes():
+    selection = get_exit_nodes()
+    if selection and "{" not in selection and "," not in selection:
         set_exit_nodes("")
     await restart()
 
