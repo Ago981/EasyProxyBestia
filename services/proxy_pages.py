@@ -351,6 +351,7 @@ class HLSProxyPagesMixin:
                 "aes_key": "/key?key_url=https://server.com/key.bin",  # ✅ NUOVO
                 "playlist": "/playlist?url=http://example.com/playlist1.m3u8;http://example.com/playlist2.m3u8",
                 "custom_headers": "/proxy/hls/manifest.m3u8?d=<URL>&h_Authorization=Bearer%20token",
+                "forced_extractor": "/proxy/hls/manifest.m3u8?d=<URL>&host=vavoo&max_res=true",
                 "dual_hls": "/dual/manifest.m3u8?d=<Base64URL(JSON)> [&api_password=<PASSWORD>]",
             },
         }

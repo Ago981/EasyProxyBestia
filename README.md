@@ -179,6 +179,8 @@ http://localhost:7860/proxy/manifest.m3u8?url=<URL>
 **Options:**
 - `&clearkey=KID:KEY`: Provide keys for DASH streams.
 - `&warp=off`: Force the request to bypass the WARP VPN and use the server's real IP (Direct Connection).
+- `&host=<HOST>`: Force a specific extractor instead of auto-detection (e.g., `&host=vavoo`).
+- `&max_res=true`: Serve only the highest video variant.
 - `&h_<Header Name>=<Value>`: Pass custom headers (e.g., `&h_User-Agent=VLC`).
 
 ### 🔍 Stream Extractor

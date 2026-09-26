@@ -343,9 +343,12 @@ def setup_recording_routes(app, recording_manager):
             url: Stream URL to record (required, URL-encoded)
             name: Recording name (optional)
             duration: Duration in seconds (optional)
+            extractor: Force a specific extractor instead of auto-detection (optional)
+            max_res: Record only the highest video variant (optional)
+            key_id / key: ClearKey for DRM-protected streams (optional)
 
         Example:
-            /record?url=https%3A%2F%2Fvavoo.to%2Fplay%2F...&name=Sky%20Sport&duration=3600
+            /record?url=https%3A%2F%2Fvavoo.to%2Fplay%2F...&name=Sky%20Sport&duration=3600&extractor=vavoo&max_res=1
         """
         if not check_password(request):
             return web.json_response({"error": "Unauthorized"}, status=401)
