@@ -21,6 +21,7 @@ TOR_DATA_DIR = os.path.join(config_store.CONFIG_DIR, "tor")
 TORRC_PATH = os.path.join(TOR_DATA_DIR, "torrc")
 TOR_LOG_PATH = os.path.join(TOR_DATA_DIR, "tor.log")
 TOR_CHECK_URL = "https://check.torproject.org/api/ip"
+TOR_GEOIP_PATH = "/usr/share/tor/geoip"
 TOR_CONTROL_HOST = "127.0.0.1"
 TOR_CONTROL_PORT = 9051
 TOR_BOOTSTRAP_TIMEOUT = 90
@@ -154,6 +155,11 @@ def _write_torrc() -> None:
     ]
     exit_nodes = get_exit_nodes()
     if exit_nodes:
+        if "{" in exit_nodes and not os.path.exists(TOR_GEOIP_PATH):
+            raise TorError(
+                "Tor GeoIP database is missing (install tor-geoipdb); "
+                "cannot select an exit country"
+            )
         # Pin the exit so the egress IP never changes between circuits.
         lines.append(f"ExitNodes {exit_nodes}")
         lines.append("StrictNodes 1")
