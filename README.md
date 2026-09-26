@@ -144,10 +144,10 @@ Tor is installed in the Docker image and starts only after enabling it from
 An exit can still change after a failure or process restart. The panel includes
 start/stop, manual identity change, Tor egress check and logs. **Exit country**
 is a list loaded live from Tor (onionoo) with only the countries currently
-running exit relays; pick one to pin the exit to that country. **Request new
-IP** keeps a country selection and rotates within it. Tor is TCP-only and
-should normally be used on selected routes rather than as the default for all
-streaming traffic.
+running exit relays; picking one pins the relay Tor selects in that country, so
+the egress IP stays fixed until **Request new IP**, which picks another relay
+in the same country. Tor is TCP-only and should normally be used on selected
+routes rather than as the default for all streaming traffic.
 
 In the Admin Panel speed test, **Direct** uses Ookla. Every proxy route uses a
 real SOCKS5/HTTP proxied TCP throughput test, shows the egress IP, and does not

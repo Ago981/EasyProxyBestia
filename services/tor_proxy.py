@@ -28,8 +28,10 @@ TOR_BOOTSTRAP_TIMEOUT = 90
 TOR_MAX_CIRCUIT_DIRTINESS = "30 days"
 
 _BIND_RE = re.compile(r"^(?P<host>[A-Za-z0-9_.\-\[\]:]+):(?P<port>\d{1,5})$")
+_FINGERPRINT_RE = re.compile(r"^\$?[0-9A-Fa-f]{40}$")
 _process: asyncio.subprocess.Process | None = None
 _bootstrap_level: int | None = None
+_exclude_nodes = ""
 _lock = asyncio.Lock()
 
 
@@ -75,6 +77,18 @@ def set_exit_nodes(value: str) -> str:
         raise TorError(f"Invalid exit nodes: {value!r}")
     config_store.set("tor_exit_nodes", nodes)
     return nodes
+
+
+def get_exit_country() -> str:
+    return str(config_store.get("tor_exit_country", "") or "").strip().lower()
+
+
+def set_exit_country(value: str) -> str:
+    country = (value or "").strip().lower().strip("{}")
+    if country and not re.fullmatch(r"[a-z]{2}", country):
+        raise TorError(f"Invalid country code: {value!r}")
+    config_store.set("tor_exit_country", country)
+    return country
 
 
 def is_enabled() -> bool:
@@ -163,6 +177,8 @@ def _write_torrc() -> None:
         # Pin the exit so the egress IP never changes between circuits.
         lines.append(f"ExitNodes {exit_nodes}")
         lines.append("StrictNodes 1")
+    if _exclude_nodes:
+        lines.append(f"ExcludeNodes {_exclude_nodes}")
     lines += [
         f"ControlPort {TOR_CONTROL_HOST}:{TOR_CONTROL_PORT}",
         "CookieAuthentication 1",
@@ -341,36 +357,80 @@ async def _verify_config() -> None:
 
 
 async def new_identity() -> None:
-    """Switch to a fresh exit, keeping any country/set selection.
+    """Switch to a fresh exit, keeping any country selection.
 
-    A single-relay pin (fingerprint or nickname) is released first so the
-    restart can pick a different relay; country (`{it}`) or comma-separated
-    selections are kept, so the new exit still matches them. A restart is
-    required: SIGNAL NEWNYM alone leaves the old circuits alive
+    With a country preference the new relay is chosen inside that country and
+    pinned, excluding the relay currently pinned so the egress IP really
+    changes. A single-relay pin without a country is released as before. A
+    restart is required: SIGNAL NEWNYM alone leaves the old circuits alive
     (MaxCircuitDirtiness is 30 days) and they keep serving new streams, so the
     previous IP can come back.
     """
     if _pid() is None:
         raise TorError("Tor is not running")
+    country = get_exit_country()
+    if country:
+        current = get_exit_nodes()
+        exclude = f"${current.lstrip('$')}" if _FINGERPRINT_RE.fullmatch(current or "") else ""
+        await _pin_country_exit(country, exclude=exclude)
+        return
     selection = get_exit_nodes()
     if selection and "{" not in selection and "," not in selection:
         set_exit_nodes("")
     await restart()
 
 
+def _country_selection(value: str) -> str | None:
+    match = re.fullmatch(r"\{([A-Za-z]{2})\}", (value or "").strip())
+    return match.group(1).lower() if match else None
+
+
+async def _pin_country_exit(country: str, exclude: str = "") -> None:
+    """Let Tor pick an exit in the country, then pin the relay it picked.
+
+    The country stays stored as preference; the fingerprint pin keeps the
+    egress IP fixed until the next new-identity request.
+    """
+    global _exclude_nodes
+    set_exit_nodes("{" + country + "}")
+    _exclude_nodes = exclude
+    try:
+        await restart()
+        fingerprint = await current_exit_fingerprint()
+    finally:
+        _exclude_nodes = ""
+    set_exit_nodes(fingerprint)
+    await restart()
+
+
 async def apply_exit_nodes(value: str) -> None:
     """Apply an exit selection, rolling back to the previous one on failure.
 
-    A country can be unreachable from the current network: with StrictNodes,
-    Tor then never finishes bootstrapping. Restoring the previous selection
-    keeps a working Tor instead of leaving it stopped.
+    A single country code (`{it}`) picks and pins an exit relay in that
+    country. Anything else (fingerprint, nickname, set, empty) is written to
+    ExitNodes as-is. A failed selection can leave Tor unable to bootstrap:
+    restoring the previous one keeps a working Tor instead of leaving it
+    stopped.
     """
-    previous = get_exit_nodes()
-    set_exit_nodes(value)
+    value = (value or "").strip()
+    previous_nodes = get_exit_nodes()
+    previous_country = get_exit_country()
+    country = _country_selection(value)
     try:
-        await restart()
+        if country:
+            set_exit_country(country)
+            await _pin_country_exit(country)
+        elif value:
+            set_exit_country("")
+            set_exit_nodes(value)
+            await restart()
+        else:
+            set_exit_country("")
+            set_exit_nodes("")
+            await restart()
     except TorError as exc:
-        set_exit_nodes(previous)
+        set_exit_nodes(previous_nodes)
+        set_exit_country(previous_country)
         message = str(exc)
         try:
             await start()
@@ -385,6 +445,15 @@ async def _pin_current_exit() -> None:
     fingerprint = await current_exit_fingerprint()
     set_exit_nodes(fingerprint)
     await restart()
+
+
+async def _pin_default_exit() -> None:
+    """Pin an exit according to the stored preference (country or current)."""
+    country = get_exit_country()
+    if country:
+        await _pin_country_exit(country)
+    else:
+        await _pin_current_exit()
 
 
 async def _start() -> None:
@@ -442,7 +511,7 @@ async def start() -> None:
     await _start()
     if not get_exit_nodes():
         try:
-            await _pin_current_exit()
+            await _pin_default_exit()
         except TorError as exc:
             logger.warning("Could not auto-pin a Tor exit: %s", exc)
 
@@ -528,6 +597,7 @@ async def status(with_probe: bool = False) -> dict:
         "available": available(),
         "automatic_rotation": False,
         "exit_nodes": get_exit_nodes(),
+        "exit_country": get_exit_country(),
         "bootstrap": _bootstrap_level,
         "probe_ip": "",
     }
@@ -546,7 +616,7 @@ async def ensure_running() -> None:
             return
     if _pid() is not None and not get_exit_nodes():
         try:
-            await _pin_current_exit()
+            await _pin_default_exit()
         except TorError as exc:
             logger.warning("Could not pin a Tor exit: %s", exc)
 
@@ -564,6 +634,7 @@ async def keepalive_loop(interval: float = 30.0) -> None:
 
 __all__ = [
     "TorError", "available", "get_bind", "set_bind", "is_enabled", "set_enabled",
-    "get_exit_nodes", "set_exit_nodes", "apply_exit_nodes", "current_exit_fingerprint",
+    "get_exit_nodes", "set_exit_nodes", "get_exit_country", "set_exit_country",
+    "apply_exit_nodes", "current_exit_fingerprint",
     "start", "stop", "restart", "new_identity", "check", "logs", "status", "keepalive_loop",
 ]
