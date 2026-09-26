@@ -191,7 +191,8 @@ http://localhost:7860/extractor/video?d=<URL>&redirect_stream=true
 ### 📼 DVR & Recordings
 Manage your recordings via the `/recordings` web UI or API.
 - `/record?url=<URL>&name=<NAME>`: Start recording and watch simultaneously.
-- `/api/recordings/start`: Trigger a background recording.
+- Optional parameters: `extractor=<HOST>` (force a specific extractor instead of auto-detection), `max_res=1` (record only the highest video variant), `duration=<SECONDS>`, `key_id=<KID>&key=<KEY>` (ClearKey DRM).
+- `/api/recordings/start`: Trigger a background recording (JSON body accepts the same options: `extractor`, `max_res`).
 
 ---
 
