@@ -278,8 +278,9 @@ async function resolve() {
             const segChecks = await Promise.all(
               testIndices.map(i =>
                 fetchImpl(segMatches[i], fetchOptions({
+                  method: "HEAD",
                   headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
-                  signal: AbortSignal.timeout(3000),
+                  signal: AbortSignal.timeout(2000),
                 })).catch(() => null)
               )
             );
