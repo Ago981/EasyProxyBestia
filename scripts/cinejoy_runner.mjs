@@ -216,18 +216,11 @@ async function resolve() {
   log("Target:", target);
 
   const servers = await getServers();
-  let candidateServers = [];
-  if (require4k) {
-    candidateServers = [
-      ...servers.filter((s) => s["4k"] === true),
-      ...servers.filter((s) => !s["4k"]),
-    ];
-  } else {
-    const nebula = servers.filter((s) => s.name === "Nebula");
-    const others = servers.filter((s) => s.name !== "Nebula" && !s["4k"]);
-    const with4k = servers.filter((s) => s["4k"]);
-    candidateServers = [...nebula, ...others, ...with4k];
-  }
+  const with4k = servers.filter((s) => s["4k"] === true);
+  const nebula = servers.filter((s) => s.name === "Nebula");
+  const others = servers.filter((s) => !s["4k"] && s.name !== "Nebula");
+  // Always seek 4K (highest resolution) first, fallback to 1080p if down or unavailable
+  const candidateServers = [...with4k, ...nebula, ...others];
 
   if (candidateServers.length === 0) {
     throw new Error("No active Cinejoy server found");
