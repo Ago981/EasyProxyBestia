@@ -327,6 +327,22 @@ function patchPlayerChunk(source) {
     "function c6(e,t){return e-=123,c2()[e]}",
     "function c6(e,t){return e-=123,c2()[e]}globalThis.__playerRoutePrefix=c6(185);globalThis.__playerRouteSegment=c6(449);globalThis.__playerCsrf=JSON.parse(c6(674))[\"X-Csrf-Token\"];",
   );
+  patched = patched.replace(
+    "cc._0x1105e5=cR,globalThis._0x1105e5=cc._0x1105e5",
+    "cc._0x1105e5=cR,globalThis.__playerInit=cR,globalThis._0x1105e5=cc._0x1105e5",
+  );
+  patched = patched.replace(
+    "cc._0x3512a5=cq,globalThis._0x3512a5=cc._0x3512a5",
+    "cc._0x3512a5=cq,globalThis.__playerDecrypt=cq,globalThis._0x3512a5=cc._0x3512a5",
+  );
+  patched = patched.replace(
+    'join("")}s9.from("xZ/aW~D6:U0_]EVA");',
+    'join("")}globalThis.__playerEncode=cr;s9.from("xZ/aW~D6:U0_]EVA");',
+  );
+  patched = patched.replace(
+    "function cE(e,t){return e-=232,cb()[e]}",
+    'function cE(e,t){return e-=232,cb()[e]}globalThis.__playerRoutePrefix=cE(634);globalThis.__playerRouteSegment=cE(506);globalThis.__playerCsrf=JSON.parse(\'{"X-Csrf-Token":"XmgpzuVhnNr2zwA1p4wmG4kVSwbwvwiy"}\')["X-Csrf-Token"];',
+  );
   return patched;
 }
 
