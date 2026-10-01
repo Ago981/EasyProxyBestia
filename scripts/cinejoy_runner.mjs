@@ -20,9 +20,9 @@ const WASM_URL = `${API_URL}/crush.wasm`;
 const BASE_URL = (() => {
   try {
     const u = new URL(input.startsWith("http") ? input : `https://${input}`);
-    return /(^|\.)cinejoy\.[a-z]{2,}$/i.test(u.hostname) ? u.origin : "https://cinejoy.to";
+    return /(^|\.)cinejoy\.[a-z]{2,}$/i.test(u.hostname) ? u.origin : "https://cinejoy.pk";
   } catch {
-    return "https://cinejoy.to";
+    return "https://cinejoy.pk";
   }
 })();
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -216,12 +216,22 @@ async function resolve() {
   log("Target:", target);
 
   const servers = await getServers();
-  const primaryServer = servers.find((s) => s["4k"] === true)
-    || (require4k ? null : servers[0]);
-  if (!primaryServer) {
-    throw new Error(require4k ? "No active Cinejoy 4K server found" : "No active Cinejoy server found");
+  let candidateServers = [];
+  if (require4k) {
+    candidateServers = [
+      ...servers.filter((s) => s["4k"] === true),
+      ...servers.filter((s) => !s["4k"]),
+    ];
+  } else {
+    const nebula = servers.filter((s) => s.name === "Nebula");
+    const others = servers.filter((s) => s.name !== "Nebula" && !s["4k"]);
+    const with4k = servers.filter((s) => s["4k"]);
+    candidateServers = [...nebula, ...others, ...with4k];
   }
-  log("Using server:", primaryServer.name);
+
+  if (candidateServers.length === 0) {
+    throw new Error("No active Cinejoy server found");
+  }
 
   const isMovie = target.type === "movie";
   const requestPath = isMovie ? "movie" : "series";
@@ -229,25 +239,69 @@ async function resolve() {
     ? { tmdb: target.tmdbId }
     : { tmdb: target.tmdbId, season: String(target.season || 1), episode: String(target.episode || 1) };
 
-  const data = await encryptedRequest(`/${primaryServer.name}/${requestPath}`, requestPayload);
-  const entries = Array.isArray(data?.stream) ? data.stream : [];
-  const primaryEntry = entries.find((e) => e?.playlist) || entries[0];
-  const playlistUrl = primaryEntry?.playlist;
+  let lastError = null;
+  for (const server of candidateServers) {
+    try {
+      log("Trying server:", server.name);
+      const data = await encryptedRequest(`/${server.name}/${requestPath}`, requestPayload);
+      const entries = Array.isArray(data?.stream) ? data.stream : [];
+      const primaryEntry = entries.find((e) => e?.playlist) || entries[0];
+      const playlistUrl = primaryEntry?.playlist;
+      if (!playlistUrl) continue;
 
-  if (!playlistUrl) {
-    throw new Error("Cinejoy returned no playlist URL");
+      if (playlistUrl.includes("cheaptruckrepairs.cc")) {
+        const check = await fetchImpl(playlistUrl, fetchOptions({
+          headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
+          signal: AbortSignal.timeout(3000),
+        })).catch(() => null);
+        if (!check || !check.ok) {
+          log(`Server ${server.name} playlist unreachable (${check?.status}), skipping...`);
+          continue;
+        }
+        const text = await check.text();
+        const subMatch = text.match(/https?:\/\/[^\s"']+/);
+        if (subMatch) {
+          const subRes = await fetchImpl(subMatch[0], fetchOptions({
+            headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
+            signal: AbortSignal.timeout(3000),
+          })).catch(() => null);
+          if (!subRes || !subRes.ok) {
+            log(`Server ${server.name} sub-manifest unreachable (${subRes?.status}), skipping...`);
+            continue;
+          }
+          const subText = await subRes.text();
+          const segMatch = subText.match(/https?:\/\/[^\s"']+\.html/);
+          if (segMatch) {
+            const segRes = await fetchImpl(segMatch[0], fetchOptions({
+              headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
+              signal: AbortSignal.timeout(3000),
+            })).catch(() => null);
+            if (!segRes || !segRes.ok) {
+              log(`Server ${server.name} segment unreachable (${segRes?.status}), skipping...`);
+              continue;
+            }
+          }
+        }
+      }
+
+      log("Selected working server:", server.name);
+      return {
+        url: playlistUrl,
+        headers: {
+          "User-Agent": UA,
+          Referer: `${BASE_URL}/`,
+          Origin: BASE_URL,
+        },
+        server: server.name,
+        target,
+      };
+    } catch (err) {
+      log(`Server ${server.name} error:`, err.message);
+      lastError = err;
+    }
   }
 
-  return {
-    url: playlistUrl,
-    headers: {
-      "User-Agent": UA,
-      Referer: `${BASE_URL}/`,
-      Origin: BASE_URL,
-    },
-    server: primaryServer.name,
-    target,
-  };
+  throw lastError || new Error("All Cinejoy servers failed to return a valid stream");
 }
 
 try {
