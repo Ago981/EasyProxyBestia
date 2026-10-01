@@ -78,9 +78,11 @@ function parseTarget(arg) {
       const idx = parts.indexOf(key);
       const idPart = parts[idx + 1] || "";
       const tmdbId = Number(idPart.split("-")[0]);
-      const s = parts[idx + 2] || url.searchParams.get("s") || url.searchParams.get("season") || "1";
-      const e = parts[idx + 3] || url.searchParams.get("e") || url.searchParams.get("episode") || "1";
-      return { type: "tv", tmdbId, season: Number(s), episode: Number(e) };
+      const rawS = parts[idx + 2] || url.searchParams.get("s") || url.searchParams.get("season") || "1";
+      const rawE = parts[idx + 3] || url.searchParams.get("e") || url.searchParams.get("episode") || "1";
+      const s = Number(String(rawS).replace(/\D+/g, "")) || 1;
+      const e = Number(String(rawE).replace(/\D+/g, "")) || 1;
+      return { type: "tv", tmdbId, season: s, episode: e };
     }
 
     const numMatch = pathname.match(/\d+/);
@@ -252,9 +254,10 @@ async function resolve() {
           continue;
         }
         const text = await check.text();
-        const subMatch = text.match(/https?:\/\/[^\s"']+/);
-        if (subMatch) {
-          const subRes = await fetchImpl(subMatch[0], fetchOptions({
+        const allSubs = [...text.matchAll(/https?:\/\/[^\s"']+/g)].map(m => m[0]);
+        const videoSub = allSubs.find(u => u.includes("/video/")) || allSubs[0];
+        if (videoSub) {
+          const subRes = await fetchImpl(videoSub, fetchOptions({
             headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
             signal: AbortSignal.timeout(3000),
           })).catch(() => null);
@@ -263,14 +266,25 @@ async function resolve() {
             continue;
           }
           const subText = await subRes.text();
-          const segMatch = subText.match(/https?:\/\/[^\s"']+\.html/);
-          if (segMatch) {
-            const segRes = await fetchImpl(segMatch[0], fetchOptions({
-              headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
-              signal: AbortSignal.timeout(3000),
-            })).catch(() => null);
-            if (!segRes || !segRes.ok) {
-              log(`Server ${server.name} segment unreachable (${segRes?.status}), skipping...`);
+          const segMatches = [...subText.matchAll(/https?:\/\/[^\s"']+\.html/g)]
+            .map(m => m[0])
+            .filter(u => !u.includes("init"));
+          if (segMatches.length > 0) {
+            const testIndices = [
+              0,
+              Math.min(5, segMatches.length - 1),
+              Math.floor(segMatches.length / 2),
+            ].filter((idx, pos, arr) => arr.indexOf(idx) === pos && idx < segMatches.length);
+            const segChecks = await Promise.all(
+              testIndices.map(i =>
+                fetchImpl(segMatches[i], fetchOptions({
+                  headers: { "User-Agent": UA, Referer: `${BASE_URL}/`, Origin: BASE_URL },
+                  signal: AbortSignal.timeout(3000),
+                })).catch(() => null)
+              )
+            );
+            if (segChecks.some(r => !r || !r.ok)) {
+              log(`Server ${server.name} segment probe failed, skipping...`);
               continue;
             }
           }
