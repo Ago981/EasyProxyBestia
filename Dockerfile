@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # FlareSolverr is part of this image, but EasyProxy starts it only on-demand
 # when VixSrc returns a Cloudflare challenge.
-ARG FLARESOLVERR_VERSION=3.5.0
+ARG FLARESOLVERR_VERSION=3.5.2
 RUN set -eux; \
     git clone --depth 1 --branch "v${FLARESOLVERR_VERSION}" \
         https://github.com/FlareSolverr/FlareSolverr.git /opt/flaresolverr; \
