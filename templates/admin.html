@@ -474,6 +474,7 @@
         <div class="card card-wide">
             <h2><span class="icon">🧪</span> Extractor Health Check</h2>
             <p class="help-text">Runs every extractor against a real sample link from <code>extractors/extractor_test_urls.json</code>; empty ones are skipped.</p>
+            <p class="help-text">If an extractor fails, first try assigning a proxy to it under <strong>Per-Extractor Proxies</strong> (some hosts are geo/IP blocked). Only if it still fails after that, open an issue on <a href="https://github.com/realbestia1/EasyProxy/issues" target="_blank" rel="noopener">GitHub</a>.</p>
             <button class="btn btn-primary btn-sm" onclick="runExtractorTests()" id="extractors-test-btn">🧪 Test Extractors</button>
             <div id="extractors-test-result" class="speedtest-results" style="display:none;font-size:0.75rem;margin-top:12px"></div>
         </div>
