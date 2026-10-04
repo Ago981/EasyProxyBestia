@@ -14,6 +14,7 @@ import hashlib
 import socket
 import config as _config
 import config_store
+import services.wg_tunnels as wg_tunnels
 from services.session_lifetime import retire_session
 from services.socks_bridge import close_socks_bridges
 
@@ -1034,6 +1035,20 @@ class HLSProxyCoreMixin:
 
         session = await self._get_session(prefer_default_family=prefer_default_family)
         return SharedSessionWrapper(session), None
+
+    async def _recover_tunnel_proxy(self, proxy_url: str | None) -> bool:
+        """Reconnect the local WireGuard tunnel behind proxy_url and refresh sessions.
+
+        Returns True only when the tunnel was actually restarted and its SOCKS
+        bind is ready, so callers can retry the failed request.
+        """
+        slot = wg_tunnels.slot_for_proxy_url(proxy_url)
+        if not slot or not await wg_tunnels.reconnect(slot):
+            return False
+        _config.clear_proxy_dead(proxy_url)
+        await self._invalidate_proxy_session(proxy_url, invalidate_streams=True)
+        logger.warning("[NET] Recovered WireGuard tunnel %s for %s", slot, proxy_url)
+        return True
 
     async def _invalidate_proxy_session(
         self,

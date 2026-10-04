@@ -738,6 +738,14 @@ def mark_proxy_dead(proxy_url: str, dead_duration: int = 300):
     logging.warning(f"Proxy {proxy_url} marked as dead for {dead_duration} seconds.")
 
 
+def clear_proxy_dead(proxy_url: str) -> None:
+    """Drop a proxy from the dead cache after a successful recovery."""
+    if not proxy_url:
+        return
+    with _proxy_lock:
+        DEAD_PROXIES.pop(proxy_url, None)
+
+
 def clear_proxy_affinity():
     pass
 
