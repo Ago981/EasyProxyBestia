@@ -224,6 +224,23 @@ class ProxyList(list):
         self.strict = strict
 
 
+PROXY_ALIAS_NAMES = ("torproxy", "nordvpn", "cwg")
+
+
+def resolve_proxy_alias(value: str | None) -> str | None:
+    """Translate proxy=torproxy|nordvpn|cwg into the tunnel's local SOCKS URL."""
+    name = (value or "").strip().lower()
+    if name not in PROXY_ALIAS_NAMES:
+        return value
+    if name == "torproxy":
+        from services import tor_proxy
+        bind = tor_proxy.get_bind()
+    else:
+        from services import wg_tunnels
+        bind = wg_tunnels.get_bind("nordvpn" if name == "nordvpn" else "custom")
+    return f"socks5h://{bind}" if bind else value
+
+
 def get_preferred_proxy(proxies: list | None) -> str | None:
     """Return the first proxy from an ordered list. No alive filtering (use async version for that)."""
     if not proxies:

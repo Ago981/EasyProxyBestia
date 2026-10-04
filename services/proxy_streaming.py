@@ -441,6 +441,7 @@ class HLSProxyStreamingMixin:
                 forced_proxy = None
                 _shared.BYPASS_PROXIES_CONTEXT.set(True)
                 logger.debug(f"🔍 [Segment-DEBUG] proxy=off detected, BYPASS_PROXIES_CONTEXT=True, bypass_warp={bypass_warp}")
+            forced_proxy = _config.resolve_proxy_alias(forced_proxy)
             forced_proxy = self._discard_disabled_warp_route(
                 forced_proxy, bypass_warp
             )
@@ -625,6 +626,7 @@ class HLSProxyStreamingMixin:
             if force_direct or bypass_proxies
             else (forced_proxy or request.query.get("proxy") or None)
         )
+        forced_proxy = _config.resolve_proxy_alias(forced_proxy)
         forced_proxy = self._discard_disabled_warp_route(
             forced_proxy, bypass_warp
         )
@@ -1831,6 +1833,7 @@ class HLSProxyStreamingMixin:
             if forced_proxy and forced_proxy.lower() == "off":
                 forced_proxy = None
                 _shared.BYPASS_PROXIES_CONTEXT.set(True)
+            forced_proxy = _config.resolve_proxy_alias(forced_proxy)
             forced_proxy = self._discard_disabled_warp_route(
                 forced_proxy, bypass_warp
             )

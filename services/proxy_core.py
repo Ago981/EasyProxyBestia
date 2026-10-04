@@ -868,6 +868,7 @@ class HLSProxyCoreMixin:
 
         if forced_proxy:
             forced_proxy = urllib.parse.unquote(forced_proxy)
+            forced_proxy = _config.resolve_proxy_alias(forced_proxy)
             if forced_proxy.lower() == "off":
                 forced_proxy = None
 

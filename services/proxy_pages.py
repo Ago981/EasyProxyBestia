@@ -1107,7 +1107,8 @@ class HLSProxyPagesMixin:
                 endpoint = item.get("endpoint", "/proxy/stream")
                 req_headers = item.get("request_headers", {})
                 bypass_warp = item.get("warp") == "off"
-                bypass_proxies = item.get("proxy") == "off"
+                proxy_route = str(item.get("proxy") or "").strip()
+                bypass_proxies = proxy_route == "off"
 
                 # Costruisci query params
                 encoded_url = urllib.parse.quote(dest_url, safe="")
@@ -1130,6 +1131,10 @@ class HLSProxyPagesMixin:
                 # Aggiungi bypass proxy se richiesto
                 if bypass_proxies:
                     params.append("proxy=off")
+                elif proxy_route and proxy_route not in ("on", "true", "1"):
+                    params.append(
+                        f"proxy={urllib.parse.quote(proxy_route, safe='')}"
+                    )
 
                 # Costruisci URL finale
                 query_string = "&".join(params)

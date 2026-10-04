@@ -106,8 +106,8 @@ def setup_recording_routes(app, recording_manager):
         qsl = parse_qsl(parsed.query)
         if warp == 'off':
             qsl.append(('warp', 'off'))
-        if proxy == 'off':
-            qsl.append(('proxy', 'off'))
+        if proxy and proxy != 'on':
+            qsl.append(('proxy', str(proxy).strip()))
         if disable_ssl == '1':
             qsl.append(('disable_ssl', '1'))
         url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(qsl), parsed.fragment))
