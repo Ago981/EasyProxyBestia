@@ -515,14 +515,13 @@
         }
 
         .url-item-option select {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-primary);
-            border-radius: 6px;
-            color: var(--text-primary);
+            background: transparent;
+            border: none;
+            color: inherit;
             font: inherit;
             cursor: pointer;
             outline: none;
-            padding: 1px 4px;
+            padding: 0;
         }
 
         .url-item-option select option {
@@ -1009,7 +1008,7 @@
                                 Warp Off
                             </label>
                             <label class="url-item-option ${item.proxy && item.proxy !== 'auto' ? 'active' : ''}">
-                                <select data-opt="proxy" data-index="${i}">
+                                <select data-opt="proxy" data-index="${i}" title="Auto: transport route → extractor → global → WARP">
                                     <option value="auto" ${!item.proxy || item.proxy === 'auto' ? 'selected' : ''}>Proxy: Auto</option>
                                     <option value="off" ${item.proxy === 'off' ? 'selected' : ''}>Proxy: Off</option>
                                     <option value="torproxy" ${item.proxy === 'torproxy' ? 'selected' : ''}>Proxy: Tor</option>
