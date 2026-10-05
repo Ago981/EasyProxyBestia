@@ -508,6 +508,13 @@ class HLSProxyCoreMixin:
                 rc = await self._run_warp_control("restart")
                 if rc != 0:
                     return {"status": "error", "message": "wireproxy restart failed"}
+                # The control script returns as soon as wireproxy is spawned;
+                # probing now races the SOCKS listener bind.
+                if not await self._wait_for_warp_socket(timeout=10.0):
+                    return {
+                        "status": "error",
+                        "message": "wireproxy restarted but SOCKS port 1080 did not come up",
+                    }
                 healthy, reason = await self._probe_warp(timeout_sec=8)
                 self.warp_status = "Connected" if healthy else "Disconnected"
                 self._warp_status_reason = reason
