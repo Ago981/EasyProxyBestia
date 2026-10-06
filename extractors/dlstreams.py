@@ -75,10 +75,11 @@ class DLStreamsExtractor:
     # Players poll the extractor every few seconds. Re-scraping the player
     # pages on every poll gets the iframe host to answer 429, so reuse a
     # validated stream URL for a short window instead. When a re-scrape fails,
-    # keep serving the last known URL (its token lives for hours) with a small
-    # backoff so the failing host is not hammered.
+    # serve the last known URL only if it still probes alive (never hang the
+    # player 40-50s on a dead playlist) with a small backoff so the failing
+    # host is not hammered. Stale window tracks the signed-token lifetime (~3-4 min).
     STREAM_CACHE_SECONDS = 30.0
-    STREAM_CACHE_STALE_SECONDS = 900.0
+    STREAM_CACHE_STALE_SECONDS = 300.0
     STREAM_CACHE_FAIL_BACKOFF_SECONDS = 15.0
     MAX_HOST_BACKOFF_SECONDS = 3600.0
 
@@ -623,12 +624,17 @@ class DLStreamsExtractor:
                         self._inflight_extract_tasks.pop(channel_key, None)
         except Exception:
             if cached and cached[1] > time.monotonic():
+                if await self._is_cached_still_alive(cached[2]):
+                    logger.warning(
+                        "DLStreams: extraction failed for %s, serving last known stream URL",
+                        channel_key,
+                    )
+                    self._backoff_cache_entry(channel_key, cached)
+                    return dict(cached[2])
                 logger.warning(
-                    "DLStreams: extraction failed for %s, serving last known stream URL",
+                    "DLStreams: cached stream for %s is dead, not serving stale",
                     channel_key,
                 )
-                self._backoff_cache_entry(channel_key, cached)
-                return dict(cached[2])
             raise
 
         if result and result.pop("_validated", False):
@@ -639,12 +645,17 @@ class DLStreamsExtractor:
                 dict(result),
             )
         elif result and cached and cached[1] > time.monotonic():
+            if await self._is_cached_still_alive(cached[2]):
+                logger.warning(
+                    "DLStreams: no player validated for %s, serving last known stream URL",
+                    channel_key,
+                )
+                self._backoff_cache_entry(channel_key, cached)
+                return dict(cached[2])
             logger.warning(
-                "DLStreams: no player validated for %s, serving last known stream URL",
+                "DLStreams: cached stream for %s is dead, not serving stale",
                 channel_key,
             )
-            self._backoff_cache_entry(channel_key, cached)
-            return dict(cached[2])
         elif result:
             result.pop("_validated", None)
         return result
@@ -657,6 +668,18 @@ class DLStreamsExtractor:
             cached[1],
             cached[2],
         )
+
+    async def _is_cached_still_alive(self, cached_result: dict) -> bool:
+        """Quick probe before serving a stale URL: fail fast instead of hanging playback."""
+        try:
+            stream_url = (cached_result or {}).get("destination_url", "")
+            if not stream_url:
+                return False
+            headers = (cached_result or {}).get("request_headers", {}) or {}
+            session = await self._get_session(stream_url)
+            return await self._is_stream_alive(session, stream_url, headers, budget=4.0)
+        except Exception:
+            return False
 
     async def _extract_impl(self, url: str, channel_id: str, **kwargs) -> Dict[str, Any]:
         try:
