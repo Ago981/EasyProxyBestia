@@ -26,6 +26,59 @@ DEFAULT_PLAYER_REFERER = "https://nadia01eo.tn76degree12ec3out.cfd/"
 DEFAULT_STREAM_DIGIT = "seth"
 SITE_URL = "https://www.fctv33hd.rest"
 
+# sport slug (event page path segment) -> sportType id (from site JS enum: ST_FOOTBALL=1 ...)
+SPORT_SLUG_MAP = {
+    "football": 1, "basketball": 2, "tennis": 3, "baseball": 4,
+    "others": 90, "cricket": 6, "motorsport": 7, "rugby": 8,
+    "american-football": 9, "aussie-rules": 10, "hockey": 11,
+    "badminton": 12, "volleyball": 13, "fighting": 14,
+    "cycling": 15, "handball": 16,
+}
+
+_EVENT_PAGE_RE = re.compile(r'/([a-z-]+)/([a-z0-9-]+)-(\d+)/([^/?#]+)\.html', re.IGNORECASE)
+
+
+def parse_event_page(url: str) -> dict | None:
+    """Detect mirror event pages like /de/badminton/<league>-<matchId>/<page>.html.
+
+    Returns sport/league/match_id/page slugs, or None. The streamId is NOT
+    in these pages (loaded client-side), it is resolved via /api/match/detail.
+    """
+    try:
+        path = urllib.parse.urlsplit(url or "").path or ""
+    except Exception:
+        return None
+    m = _EVENT_PAGE_RE.search(path)
+    if not m:
+        return None
+    return {
+        "sport": m.group(1).lower(),
+        "league": m.group(2).lower(),
+        "match_id": m.group(3),
+        "page": m.group(4).lower(),
+    }
+
+
+def _message_strings(buf: bytes, depth: int = 0) -> list:
+    """Collect all nested strings of a protobuf message (slug cross-check)."""
+    out = []
+    if depth > 3 or not isinstance(buf, (bytes, bytearray)):
+        return out
+    try:
+        fields = read_fields(bytes(buf))
+    except Exception:
+        return out
+    for vals in fields.values():
+        for v in vals:
+            if isinstance(v, int):
+                continue
+            try:
+                out.append(v.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
+            out.extend(_message_strings(v, depth + 1))
+    return out
+
 
 def rot47(text: str) -> str:
     res = []
@@ -330,12 +383,74 @@ class Fctv33Extractor(BaseExtractor):
                 logger.warning(f"Fctv33Extractor: Failed to refresh player params ({e}), using defaults")
                 self._params_ts = now - 3300  # retry sooner on failure
 
+    async def _resolve_event_stream(self, url: str, sport_type: int, site_type: int,
+                                      explicit_sport, session, headers) -> tuple:
+        """Resolve mirror event pages (matchId in slug, no streamId) via /api/match/detail."""
+        ev = parse_event_page(url)
+        if not ev:
+            raise ExtractorError(
+                f"FCTV33: Missing matchId or streamId from URL: {url} "
+                f"(need /match/<matchId>/stream/<streamId> or an event page like /<sport>/<league>-<matchId>/<page>.html)"
+            )
+        match_id = ev["match_id"]
+        if explicit_sport is not None:
+            try:
+                sport_type = int(explicit_sport)
+            except (ValueError, TypeError):
+                raise ExtractorError(f"FCTV33: invalid sportType '{explicit_sport}'")
+        else:
+            mapped = SPORT_SLUG_MAP.get(ev["sport"])
+            if mapped is None:
+                raise ExtractorError(
+                    f"FCTV33: unknown sport '{ev['sport']}' in event URL, pass ?sportType=N (URL: {url})"
+                )
+            sport_type = mapped
+        params = {
+            "matchId": match_id,
+            "sportType": str(sport_type),
+            "digit": self.stream_digit,
+            "country": self.geo.get("country", "IT"),
+            "continent": self.geo.get("continent", "EU"),
+        }
+        async with session.get(f"{self.data_api_base}/api/match/detail", params=params,
+                               headers=headers, timeout=ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                raise ExtractorError(f"FCTV33 match API returned HTTP {resp.status}")
+            content = await resp.read()
+        env = parse_api_envelope(content)
+        if env.get("message") != "Success" or not env["payload"]:
+            raise ExtractorError(f"FCTV33 match API error message: {env.get('message')}")
+        fields = read_fields(env["payload"][0])
+        match_msg = fields.get(1, [None])[0]
+        if not isinstance(match_msg, bytes):
+            raise ExtractorError("FCTV33 match API returned no match info")
+        try:
+            returned_id = read_fields(match_msg).get(1, [None])[0]
+        except Exception:
+            returned_id = None
+        if str(returned_id) != str(match_id):
+            raise ExtractorError(
+                f"FCTV33: match API returned matchId={returned_id} for requested {match_id} "
+                f"(wrong sportType? pass ?sportType=N)"
+            )
+        strs = _message_strings(match_msg)
+        if ev["league"] not in strs and ev["page"] not in strs:
+            raise ExtractorError(
+                f"FCTV33: match API response does not match event page (wrong sportType? pass ?sportType=N)"
+            )
+        items = [parse_stream_item(b) for b in fields.get(2, []) if isinstance(b, bytes)]
+        items = [it for it in items if it.get("streamId")]
+        if not items:
+            raise ExtractorError(f"FCTV33: match {match_id} lists no streams")
+        if len(items) > 1:
+            logger.info("Fctv33Extractor: match=%s lists %d streams, using first '%s' (streamId=%s)",
+                        match_id, len(items), items[0].get("name"), items[0].get("streamId"))
+        item = items[0]
+        return match_id, item["streamId"], sport_type, item.get("siteType") or site_type or 2001
+
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         match_id, stream_id, sport_type, site_type = parse_fctv33_target(url, **kwargs)
-        if not match_id or not stream_id:
-            raise ExtractorError(
-                f"FCTV33: Missing matchId or streamId (parsed matchId='{match_id}', streamId='{stream_id}') from URL: {url}"
-            )
+        need_event = not match_id or not stream_id
 
         # Merge per-request routing (proxy_streaming re-extract) + contexts + cached flag, like Cinejoy
         raw_proxy = kwargs.get("proxy")
@@ -358,6 +473,19 @@ class Fctv33Extractor(BaseExtractor):
 
         data_api = self.data_api_base
         session = await self._get_session(data_api)
+        headers = {
+            "User-Agent": self.base_headers["User-Agent"],
+            "Referer": self.player_referer,
+            "Origin": self.player_referer.rstrip("/"),
+            "Accept": "*/*",
+        }
+
+        if need_event:
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            explicit_sport = (kwargs.get("sportType") or kwargs.get("sport_type")
+                              or (qs.get("sportType") or qs.get("sport_type") or [None])[0])
+            match_id, stream_id, sport_type, site_type = await self._resolve_event_stream(
+                url, sport_type, site_type, explicit_sport, session, headers)
 
         endpoint = f"{data_api}/api/stream/detail"
         params = {
@@ -368,12 +496,6 @@ class Fctv33Extractor(BaseExtractor):
             "digit": self.stream_digit,
             "country": self.geo.get("country", "IT"),
             "continent": self.geo.get("continent", "EU"),
-        }
-        headers = {
-            "User-Agent": self.base_headers["User-Agent"],
-            "Referer": self.player_referer,
-            "Origin": self.player_referer.rstrip("/"),
-            "Accept": "*/*",
         }
 
         try:
