@@ -24,6 +24,7 @@ from config import (
     get_ordered_proxies_for_url,
 )
 import config as _cfg
+from extractors.base import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def _decode_barecrop_econfig(enc: str) -> str | None:
 class ExtractorError(Exception):
     pass
 
-class DLStreamsExtractor:
+class DLStreamsExtractor(BaseExtractor):
     """Extractor for daddy live / dlstreams streams."""
 
     # Return before the request layer kills the task at 30s: an unresponsive
@@ -84,6 +85,7 @@ class DLStreamsExtractor:
     MAX_HOST_BACKOFF_SECONDS = 3600.0
 
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers or {}, proxies, extractor_name="dlstreams")
         self.request_headers = request_headers or {}
         self.entry_origin = ""
         self.stream_origin = ""
@@ -95,8 +97,8 @@ class DLStreamsExtractor:
         self.mediaflow_endpoint = "hls_manifest_proxy"
         self.proxies = proxies or []
         self.bypass_warp_active = bypass_warp
-        self._inflight_extract_tasks: dict[str, asyncio.Task] = {}
-        self._stream_cache: dict[str, tuple[float, float, dict]] = {}
+        self._inflight_extract_tasks: dict = {}
+        self._stream_cache: dict = {}
         # host -> monotonic deadline: honour upstream Retry-After instead of
         # scraping a host that already said "too many requests".
         self._host_backoff: dict[str, float] = {}
@@ -356,6 +358,9 @@ class DLStreamsExtractor:
             "mediaflow_endpoint": self.mediaflow_endpoint,
             "captured_manifest": None,
             "captured_manifests": {stream_url: manifest_text},
+            "selected_proxy": self.last_used_proxy,
+            "force_direct": self._force_direct,
+            "bypass_warp": self.bypass_warp_active,
         }
 
     async def _extract_directly(self, url: str, channel_id: str) -> Dict[str, Any] | None:
@@ -563,12 +568,17 @@ class DLStreamsExtractor:
     async def _get_session(self, url: str | None = None):
         # Determine the correct proxy for the current state
         target_url = url or self.stream_origin or self.entry_origin
-        proxy_url = await get_preferred_proxy_for_url(target_url, "dlstreams", self.proxies, self.bypass_warp_active)
+        forced = None if self._force_direct else _cfg.effective_forced_proxy(target_url, self._forced_proxy)
+        if forced:
+            proxy_url = forced
+        else:
+            proxy_url = await get_preferred_proxy_for_url(target_url, "dlstreams", self.proxies, self.bypass_warp_active)
         if proxy_url is None and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
             raise ExtractorError(
                 "DLStreams: no usable proxy route; direct fallback disabled "
                 f"[{self._route_diagnostic(target_url)}]"
             )
+        self.last_used_proxy = proxy_url
         
         session = self._route_sessions.get(proxy_url)
         if session is not None and not session.closed:
@@ -600,8 +610,9 @@ class DLStreamsExtractor:
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extracts the M3U8 URL and headers bypassing the public watch page."""
         self._sync_entry_origin_from_url(url)
+        self._apply_routing_kwargs(url, kwargs)
         channel_id = self._extract_channel_id(url)
-        channel_key = f"premium{channel_id}"
+        channel_key = (f"premium{channel_id}", self._forced_proxy, self._force_direct, self.bypass_warp_active)
 
         cached = self._stream_cache.get(channel_key)
         if cached and cached[0] > time.monotonic():
@@ -660,7 +671,7 @@ class DLStreamsExtractor:
             result.pop("_validated", None)
         return result
 
-    def _backoff_cache_entry(self, channel_key: str, cached: tuple[float, float, dict]) -> None:
+    def _backoff_cache_entry(self, channel_key, cached: tuple[float, float, dict]) -> None:
         """Delay the next scrape, honouring any Retry-After from the hosts."""
         wait = max(self.STREAM_CACHE_FAIL_BACKOFF_SECONDS, self._rate_limit_wait())
         self._stream_cache[channel_key] = (
