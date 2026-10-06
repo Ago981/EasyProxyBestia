@@ -153,8 +153,8 @@ class DLStreamsExtractor:
             return 0.0
         return max(self._host_backoff.values()) - now
 
-    def _prioritize_player_urls(self, channel_id: str) -> list[str]:
-        return self._build_player_urls(channel_id)
+    def _prioritize_player_urls(self, channel_id: str, requested_url: str = "") -> list[str]:
+        return self._build_player_urls(channel_id, requested_url=requested_url)
 
     @staticmethod
     def _origin_of(url: str) -> str:
@@ -215,11 +215,25 @@ class DLStreamsExtractor:
             channel_id = channel_id.replace("premium", "")
         return channel_id
 
-    def _build_player_urls(self, channel_id: str) -> list[str]:
+    def _build_player_urls(self, channel_id: str, requested_url: str = "") -> list[str]:
         origin = self.entry_origin.rstrip("/")
+        req_lower = (requested_url or "").lower()
+        if "/stream/stream-" in req_lower:
+            # User explicitly requested Player 1 (/stream/)
+            return [
+                f"{origin}/stream/stream-{channel_id}.php",
+                f"{origin}/cast/stream-{channel_id}.php",
+                f"{origin}/watch/stream-{channel_id}.php",
+                f"{origin}/plus/stream-{channel_id}.php",
+                f"{origin}/casting/stream-{channel_id}.php",
+                f"{origin}/player/stream-{channel_id}.php",
+                f"{origin}/hub/stream-{channel_id}.php",
+            ]
+        # Default: prioritize Player 2 (/cast/) because it provides clean native MPEG-TS (.ts)
+        # without the heavy (7MB+) PNG-wrapped TikTok CDN overhead and frequent 403s of Player 1
         return [
-            f"{origin}/stream/stream-{channel_id}.php",
             f"{origin}/cast/stream-{channel_id}.php",
+            f"{origin}/stream/stream-{channel_id}.php",
             f"{origin}/watch/stream-{channel_id}.php",
             f"{origin}/plus/stream-{channel_id}.php",
             f"{origin}/casting/stream-{channel_id}.php",
@@ -319,6 +333,7 @@ class DLStreamsExtractor:
                 except Exception as e:
                     logger.debug("DLStreams: key probe of %s failed: %s", key_url, e)
                     return False
+            self._last_validated_manifest = current_body or master
             return True
         except Exception as e:
             logger.debug("DLStreams: validation of %s failed: %s", stream_url, e)
@@ -333,18 +348,19 @@ class DLStreamsExtractor:
         cookie_header = self._get_cookie_header_for_url(stream_url)
         if cookie_header:
             playback_headers = {**playback_headers, "Cookie": cookie_header}
+        manifest_text = getattr(self, "_last_validated_manifest", None) or ""
         return {
             "destination_url": stream_url,
             "request_headers": playback_headers,
             "mediaflow_endpoint": self.mediaflow_endpoint,
             "captured_manifest": None,
-            "captured_manifests": {stream_url: ""},
+            "captured_manifests": {stream_url: manifest_text},
         }
 
     async def _extract_directly(self, url: str, channel_id: str) -> Dict[str, Any] | None:
         """Fast path direct HTTP M3U8 extraction."""
         session = await self._get_session(url)
-        player_urls = self._prioritize_player_urls(channel_id)
+        player_urls = self._prioritize_player_urls(channel_id, requested_url=url)
         first_fallback = None  # (stream_url, playback_headers): first URL found, even if dead
         seen_iframes: set[str] = set()
         
