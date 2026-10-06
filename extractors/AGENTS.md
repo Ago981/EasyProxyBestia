@@ -62,6 +62,8 @@ class <Name>Extractor(BaseExtractor):
             self._forced_proxy, self._force_direct = str(raw_proxy), False
         else:
             self._forced_proxy, self._force_direct = None, False
+        # MANDATORY: proxy_exclude_domains drops even explicit ?proxy= (WARP exempt)
+        self._forced_proxy = _cfg.effective_forced_proxy(url, self._forced_proxy)
 
         session = await self._get_session(url)
         # ... your logic ...
