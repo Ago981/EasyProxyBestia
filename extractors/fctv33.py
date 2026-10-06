@@ -254,7 +254,7 @@ class Fctv33Extractor(BaseExtractor):
     using EasyProxy's egress IP, bypassing CDN IP-binding blocks (487 / 471).
     """
 
-    def __init__(self, request_headers: dict = None, proxies: list = None):
+    def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
         super().__init__(request_headers or {}, proxies=proxies, extractor_name="fctv33")
         self.base_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -267,6 +267,35 @@ class Fctv33Extractor(BaseExtractor):
         self._params_ts = 0
         self._init_lock = asyncio.Lock()
         self.mediaflow_endpoint = "hls_proxy"
+        self.bypass_warp_active = bool(bypass_warp)
+        self.last_used_proxy = None
+        self._forced_proxy = None
+        self._force_direct = False
+
+    async def _get_session(self, url: str = None):
+        # ponytail: explicit bypass_warp + per-request forced proxy (proxy_streaming re-extract passes proxy=forced_proxy as kwarg, not via context)
+        forced = getattr(self, "_forced_proxy", None)
+        force_direct = bool(getattr(self, "_force_direct", False))
+        if force_direct:
+            proxy_url = None
+        elif forced:
+            proxy_url = forced
+            if proxy_url and _cfg.is_warp_proxy_url(proxy_url) and self.bypass_warp_active:
+                proxy_url = None
+        else:
+            proxy_url = await get_preferred_proxy_for_url(url, self.extractor_name, self.proxies or _cfg.GLOBAL_PROXIES, self.bypass_warp_active)
+        if proxy_url is None and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
+            raise ExtractorError("FCTV33: direct fallback disabled; no proxy route available")
+        async with self._session_lock:
+            self.session = self._route_sessions.get(proxy_url)
+            self._session_proxy = proxy_url
+            if self.session is None or self.session.closed:
+                timeout = ClientTimeout(total=60, connect=30, sock_read=30)
+                connector = get_connector_for_proxy(proxy_url) if proxy_url else TCPConnector(limit=0, limit_per_host=0, keepalive_timeout=15, enable_cleanup_closed=True, use_dns_cache=True)
+                self.session = ClientSession(timeout=timeout, connector=connector, headers={'User-Agent': self.base_headers["User-Agent"]})
+                self._route_sessions[proxy_url] = self.session
+            self.last_used_proxy = proxy_url
+            return self.session
 
     async def _refresh_params_if_needed(self):
         now = time.time()
@@ -307,6 +336,23 @@ class Fctv33Extractor(BaseExtractor):
             raise ExtractorError(
                 f"FCTV33: Missing matchId or streamId (parsed matchId='{match_id}', streamId='{stream_id}') from URL: {url}"
             )
+
+        # Merge per-request routing (proxy_streaming re-extract) + contexts + cached flag, like Cinejoy
+        raw_proxy = kwargs.get("proxy")
+        bypass_proxies = str(raw_proxy or "").lower() in {"off", "none", "no"} or _cfg.BYPASS_PROXIES_CONTEXT.get()
+        bypass_warp = bool(kwargs.get("bypass_warp") or str(kwargs.get("warp", "")).lower() == "off" or _cfg.BYPASS_WARP_CONTEXT.get() or self.bypass_warp_active)
+        self.bypass_warp_active = bypass_warp
+        direct_requested = str(kwargs.get("direct", "")).lower() in {"1", "true", "yes", "on"} or (bypass_proxies and bypass_warp)
+        if direct_requested or (bypass_proxies and bypass_warp):
+            self._forced_proxy, self._force_direct = None, True
+        elif bypass_proxies:
+            self._forced_proxy, self._force_direct = (_cfg.WARP_PROXY_URL if _cfg._get_dynamic_warp_enabled() else None), False
+            if not self._forced_proxy:
+                self._force_direct = True
+        elif raw_proxy and str(raw_proxy).lower() not in {"on", "auto", "true", ""}:
+            self._forced_proxy, self._force_direct = str(raw_proxy), False
+        else:
+            self._forced_proxy, self._force_direct = None, False
 
         await self._refresh_params_if_needed()
 
@@ -360,6 +406,9 @@ class Fctv33Extractor(BaseExtractor):
                         "Origin": self.player_referer.rstrip("/"),
                     },
                     "mediaflow_endpoint": "hls_proxy",
+                    "selected_proxy": self.last_used_proxy,
+                    "force_direct": self._force_direct,
+                    "bypass_warp": self.bypass_warp_active,
                 }
         except ExtractorError:
             raise
