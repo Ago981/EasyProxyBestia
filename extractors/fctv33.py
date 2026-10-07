@@ -258,24 +258,6 @@ def parse_stream_detail(buffer: bytes) -> dict:
     return {}
 
 
-def parse_user_geo(buffer: bytes) -> dict:
-    """Parse country and continent codes from /api/user/info protobuf envelope."""
-    country, continent = "IT", "EU"
-    try:
-        env = parse_api_envelope(buffer)
-        if env.get("payload"):
-            fields = read_fields(env["payload"][0])
-            c_raw = fields.get(2, [None])[0]
-            if isinstance(c_raw, bytes):
-                country = c_raw.decode("utf-8", errors="replace")
-            cont_raw = fields.get(3, [None])[0]
-            if isinstance(cont_raw, bytes):
-                continent = cont_raw.decode("utf-8", errors="replace")
-    except Exception:
-        pass
-    return {"country": country, "continent": continent}
-
-
 def parse_fctv33_target(url: str, **kwargs) -> tuple[str, str, int, int]:
     """
     Parses matchId, streamId, sportType, siteType from various URL formats or parameters.
@@ -367,9 +349,6 @@ class Fctv33Extractor(BaseExtractor):
     using EasyProxy's egress IP, bypassing CDN IP-binding blocks (487 / 471).
     """
 
-    STREAM_CACHE_SECONDS = 45.0
-    STREAM_CACHE_STALE_SECONDS = 180.0
-
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
         super().__init__(request_headers or {}, proxies=proxies, extractor_name="fctv33")
         self.base_headers = {
@@ -387,8 +366,6 @@ class Fctv33Extractor(BaseExtractor):
         self.last_used_proxy = None
         self._forced_proxy = None
         self._force_direct = False
-        self._stream_cache: dict = {}
-        self._inflight_extract_tasks: dict = {}
 
     async def _get_session(self, url: str = None):
         # ponytail: explicit bypass_warp + per-request forced proxy (proxy_streaming re-extract passes proxy=forced_proxy as kwarg, not via context)
@@ -443,24 +420,7 @@ class Fctv33Extractor(BaseExtractor):
                                 self.player_referer = f"https://{domain_list[0].rstrip('/')}/"
                                 logger.info(f"Fctv33Extractor: Updated stream_digit={digit}, referer={self.player_referer}")
                                 break
-
-                # Geo resolution via /api/user/info for the egress IP (with IT/EU fallback)
-                try:
-                    geo_url = f"{self.data_api_base}/api/user/info"
-                    async with session.get(geo_url, headers=headers, timeout=ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            content = await resp.read()
-                            geo_info = parse_user_geo(content)
-                            if geo_info.get("country") and geo_info.get("continent"):
-                                self.geo = geo_info
-                                logger.info(
-                                    f"Fctv33Extractor: Geo updated -> country={self.geo.get('country')}, "
-                                    f"continent={self.geo.get('continent')}"
-                                )
-                except Exception as geo_err:
-                    logger.debug(f"Fctv33Extractor: Geo lookup failed ({geo_err}), keeping {self.geo}")
-
-                self._params_ts = now
+                        self._params_ts = now
             except Exception as e:
                 logger.warning(f"Fctv33Extractor: Failed to refresh player params ({e}), using defaults")
                 self._params_ts = now - 3300  # retry sooner on failure
@@ -553,56 +513,6 @@ class Fctv33Extractor(BaseExtractor):
         # ponytail: proxy_exclude_domains drops even explicit ?proxy= (WARP exempt)
         self._forced_proxy = _cfg.effective_forced_proxy(url, self._forced_proxy)
 
-        # Cache key based on match/stream target (or raw url for unparsed event page) + proxy state
-        target_key = f"{match_id}:{stream_id}" if (match_id and stream_id) else url
-        channel_key = (target_key, self._forced_proxy, self._force_direct, self.bypass_warp_active)
-
-        now = time.monotonic()
-        cached = self._stream_cache.get(channel_key)
-        if cached and cached[0] > now:
-            logger.debug(f"Fctv33Extractor: Reusing cached stream URL for {target_key}")
-            return dict(cached[2])
-
-        existing_task = self._inflight_extract_tasks.get(channel_key)
-        if existing_task and not existing_task.done():
-            logger.debug(f"Fctv33Extractor: Waiting for in-flight extraction of {target_key}")
-            return dict(await existing_task)
-
-        task = asyncio.create_task(
-            self._extract_impl(
-                url,
-                match_id=match_id,
-                stream_id=stream_id,
-                sport_type=sport_type,
-                site_type=site_type,
-                need_event=need_event,
-                **kwargs,
-            )
-        )
-        self._inflight_extract_tasks[channel_key] = task
-        try:
-            result = await task
-            now = time.monotonic()
-            self._stream_cache[channel_key] = (
-                now + self.STREAM_CACHE_SECONDS,
-                now + self.STREAM_CACHE_STALE_SECONDS,
-                dict(result),
-            )
-            return dict(result)
-        except Exception:
-            if cached and cached[1] > time.monotonic():
-                logger.warning(
-                    f"Fctv33Extractor: Extraction failed for {target_key}, serving stale cached stream URL"
-                )
-                return dict(cached[2])
-            raise
-        finally:
-            current_task = self._inflight_extract_tasks.get(channel_key)
-            if current_task is task:
-                self._inflight_extract_tasks.pop(channel_key, None)
-
-    async def _extract_impl(self, url: str, match_id: str, stream_id: str,
-                            sport_type: int, site_type: int, need_event: bool, **kwargs) -> Dict[str, Any]:
         await self._refresh_params_if_needed()
 
         data_api = self.data_api_base
@@ -671,13 +581,3 @@ class Fctv33Extractor(BaseExtractor):
         except Exception as e:
             logger.error(f"Fctv33Extractor error: {e}", exc_info=True)
             raise ExtractorError(f"FCTV33 extraction failed: {e}")
-
-    async def close(self):
-        pending_tasks = list(self._inflight_extract_tasks.values())
-        for task in pending_tasks:
-            task.cancel()
-        if pending_tasks:
-            await asyncio.gather(*pending_tasks, return_exceptions=True)
-        self._inflight_extract_tasks.clear()
-        self._stream_cache.clear()
-        await super().close()
