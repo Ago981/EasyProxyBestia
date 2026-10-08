@@ -154,6 +154,26 @@ def build_signed_stream_url(obfuscated_url: str, session_token: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{path_with_token}{query}"
 
 
+# Salt used for the _s2 segment signature. FCTV33 publishes it in the site config
+# (common:cdnSmartLink -> auth.salt). The extractor stores the fetched value here so
+# that the stateless signing helpers (used by the manifest rewriter and the proxy
+# streamer, which never see the extractor instance) sign with the live salt.
+DEFAULT_S2_SALT = "00"
+_current_s2_salt = DEFAULT_S2_SALT
+
+
+def set_current_s2_salt(salt) -> None:
+    """Update the shared _s2 salt (ignored when empty)."""
+    global _current_s2_salt
+    if salt is None or salt == "":
+        return
+    _current_s2_salt = str(salt)
+
+
+def get_current_s2_salt() -> str:
+    return _current_s2_salt
+
+
 def decode_rot13_b64(s: str, is_slice: bool = True) -> str:
     """Decode FCTV33 obfuscated parameters (_ctump, _ctuph) via ROT13 and Base64."""
     if not s:
@@ -166,8 +186,10 @@ def decode_rot13_b64(s: str, is_slice: bool = True) -> str:
         return s
 
 
-def sign_s2_token(url: str, salt: str = "00") -> str:
+def sign_s2_token(url: str, salt: str | None = None) -> str:
     """Sign segment URL with _s2 signature parameter required by FCTV33 TencentEdgeOne CDN."""
+    if salt is None:
+        salt = _current_s2_salt
     try:
         parsed = urllib.parse.urlparse(url)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -185,7 +207,7 @@ def sign_s2_token(url: str, salt: str = "00") -> str:
         return url
 
 
-def resolve_fctv33_segment_url(url: str, geo_country: str = "IT", geo_continent: str = "EU", salt: str = "00") -> str:
+def resolve_fctv33_segment_url(url: str, geo_country: str = "IT", geo_continent: str = "EU", salt: str | None = None) -> str:
     """Resolve FCTV33 segment URL (_ctump / _ctuph smart link) and append _s2 signature."""
     try:
         parsed = urllib.parse.urlparse(url)
@@ -499,6 +521,8 @@ class Fctv33Extractor(BaseExtractor):
                             auth_salt = smart_link.get("auth", {}).get("salt")
                             if auth_salt:
                                 self.salt = auth_salt
+                                set_current_s2_salt(auth_salt)
+                                logger.info("Fctv33Extractor: Updated _s2 salt")
                         except Exception:
                             pass
                         self._params_ts = now
