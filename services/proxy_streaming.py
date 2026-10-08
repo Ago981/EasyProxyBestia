@@ -675,6 +675,14 @@ class HLSProxyStreamingMixin:
                 self._renewed_cdn_tokens.pop(k, None)
                 self._renewed_cdn_token_atimes.pop(k, None)
 
+            # FCTV33: resolve smart link segment and ensure _s2 signature
+            if ("_ctump=" in stream_url and "_ctuph=" in stream_url) or (extractor_key == "fctv33" and "_ver=" in stream_url and "_s2=" not in stream_url):
+                try:
+                    from extractors.fctv33 import resolve_fctv33_segment_url
+                    stream_url = resolve_fctv33_segment_url(stream_url)
+                except Exception as _fctv_err:
+                    logger.debug("Failed to resolve FCTV33 segment in _proxy_stream: %s", _fctv_err)
+
             headers = dict(stream_headers)
 
             # Passa attraverso alcuni headers del client, ma FILTRA quelli che potrebbero leakare l'IP
