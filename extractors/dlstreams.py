@@ -612,7 +612,8 @@ class DLStreamsExtractor(BaseExtractor):
         self._sync_entry_origin_from_url(url)
         self._apply_routing_kwargs(url, kwargs)
         channel_id = self._extract_channel_id(url)
-        channel_key = (f"premium{channel_id}", self._forced_proxy, self._force_direct, self.bypass_warp_active)
+        req_mode = "stream" if "/stream/stream-" in url.lower() else "default"
+        channel_key = (f"premium{channel_id}", req_mode, self._forced_proxy, self._force_direct, self.bypass_warp_active)
 
         cached = self._stream_cache.get(channel_key)
         if cached and cached[0] > time.monotonic():

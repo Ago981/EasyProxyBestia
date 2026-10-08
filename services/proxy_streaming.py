@@ -551,6 +551,35 @@ class HLSProxyStreamingMixin:
                     "Range, Content-Type",
                 )
 
+                # Check if upstream returned an image payload that disguises MPEG-TS or static image
+                is_upstream_image = (
+                    resp.headers.get("content-type", "").lower().startswith("image/")
+                    or ".image" in segment_url.lower()
+                    or "tiktokcdn" in segment_url.lower()
+                    or "~tplv-" in segment_url.lower()
+                )
+                if is_upstream_image:
+                    content_bytes = await resp.read()
+                    unwrapped = await asyncio.to_thread(self._strip_fake_png_header_from_ts, content_bytes)
+                    if unwrapped and (len(unwrapped) > 188 and unwrapped[0] == 0x47):
+                        set_response_header(response_headers, "Content-Type", "video/mp2t")
+                        set_response_header(response_headers, "Content-Length", str(len(unwrapped)))
+                        response_headers.pop("content-range", None)
+                        response_headers.pop("Content-Range", None)
+                        response_headers.pop("accept-ranges", None)
+                        response_headers.pop("Accept-Ranges", None)
+                        return web.Response(body=unwrapped, status=resp.status, headers=response_headers)
+                    elif unwrapped and unwrapped != content_bytes:
+                        set_response_header(response_headers, "Content-Type", "video/mp2t")
+                        set_response_header(response_headers, "Content-Length", str(len(unwrapped)))
+                        return web.Response(body=unwrapped, status=resp.status, headers=response_headers)
+                    else:
+                        logger.warning(
+                            "Dropped non-video static image segment for %s (%d bytes, no TS sync byte)",
+                            segment_name, len(content_bytes)
+                        )
+                        return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*"})
+
                 response = web.StreamResponse(status=resp.status, headers=response_headers)
                 await response.prepare(request)
 
@@ -674,6 +703,14 @@ class HLSProxyStreamingMixin:
             for k in stale_tok:
                 self._renewed_cdn_tokens.pop(k, None)
                 self._renewed_cdn_token_atimes.pop(k, None)
+
+            # FCTV33: resolve smart link segment and ensure _s2 signature
+            if ("_ctump=" in stream_url and "_ctuph=" in stream_url) or (extractor_key == "fctv33" and "_ver=" in stream_url and "_s2=" not in stream_url):
+                try:
+                    from extractors.fctv33 import resolve_fctv33_segment_url
+                    stream_url = resolve_fctv33_segment_url(stream_url)
+                except Exception as _fctv_err:
+                    logger.debug("Failed to resolve FCTV33 segment in _proxy_stream: %s", _fctv_err)
 
             headers = dict(stream_headers)
 
@@ -1184,7 +1221,12 @@ class HLSProxyStreamingMixin:
                 )
                 # Image-wrapped segments need the full body to be unwrapped, so
                 # they must not take the chunk-by-chunk streaming path.
-                is_image_payload = content_type.startswith("image/")
+                is_image_payload = (
+                    content_type.startswith("image/")
+                    or ".image" in stream_url.lower()
+                    or "tiktokcdn" in stream_url.lower()
+                    or "~tplv-" in stream_url.lower()
+                )
 
                 if (is_direct_media_stream or is_segment_like) and not is_image_payload:
                     stream_ext = os.path.splitext(stream_url.split("?", 1)[0].lower())[1]
@@ -1496,6 +1538,15 @@ class HLSProxyStreamingMixin:
                     response_headers.pop("Content-Range", None)
                     response_headers.pop("accept-ranges", None)
                     response_headers.pop("Accept-Ranges", None)
+                elif is_wrapped_image_segment:
+                    # An image segment was received, but no valid TS could be unwrapped (static ad/placeholder banner)
+                    if content_bytes[:8] == b"\x89PNG\r\n\x1a\n" or (content_bytes[:4] == b"RIFF" and content_bytes[8:12] == b"WEBP"):
+                        logger.warning(
+                            "Dropped non-video static image segment (%d bytes, no TS sync byte) [%s]",
+                            len(content_bytes),
+                            stream_url[:100],
+                        )
+                        return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*"})
 
                 set_response_header(
                     response_headers, "Access-Control-Allow-Origin", "*"
