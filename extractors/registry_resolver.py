@@ -872,6 +872,14 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                 self.extractors[key] = Fctv33Extractor(
                     request_headers, proxies=proxy_list, bypass_warp=bypass_warp
                 )
+        elif "livetv.sx" in url.lower() or "livetv" in url.lower():
+            key = _cache_key("livetv", bypass_warp)
+            proxy = get_proxy_for_url("livetv.sx", bypass_warp=bypass_warp)
+            proxy_list = _build_proxy_list(proxy, "livetv")
+            if key not in self.extractors:
+                self.extractors[key] = LiveTVExtractor(
+                    request_headers, proxies=proxy_list
+                )
             return self.extractors[key]
         else:
             # ✅ MODIFICATO: Fallback al GenericHLSExtractor per qualsiasi altro URL.
