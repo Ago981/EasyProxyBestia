@@ -915,7 +915,15 @@ class HLSProxyCoreMixin:
                     retire_session(self, p_sess)
 
         proxy = None if force_direct else (forced_proxy or get_proxy_for_url(url, bypass_warp=bypass_warp))
-        if not proxy and not force_direct and not _config.is_direct_connection_allowed(bypass_warp):
+        # A host explicitly excluded from WARP with no proxy left in the chain has
+        # only one route: direct. Without this, warp_exclude_domains + proxy=off is
+        # a dead end ("No proxy route available") instead of the split routing it
+        # declares (e.g. daddy hosts via WARP, TikTok CDN direct, whose WARP egress
+        # is banned while the server IP is clean). Untouched otherwise.
+        direct_ok = _config.is_direct_connection_allowed(bypass_warp) or (
+            not proxy and _config._is_warp_excluded(url or "")
+        )
+        if not proxy and not force_direct and not direct_ok:
             raise aiohttp.ClientConnectionError(
                 "No proxy route available; direct fallback disabled"
             )
