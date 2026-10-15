@@ -17,7 +17,7 @@ from services import tor_proxy
 from services.proxy_shared import (
     logger, web, APP_VERSION,
     check_password, get_client_ip, PlaylistBuilder, ClientSession, ClientTimeout,
-    TCPConnector, ProxyConnector, get_connector_for_proxy, API_PASSWORD,
+    TCPConnector, get_connector_for_proxy, API_PASSWORD,
     get_public_base_url,
 )
 from extractors.registry import *
@@ -1192,7 +1192,7 @@ class HLSProxyPagesMixin:
             # Crea una sessione dedicata con il proxy configurato
             if proxy:
                 logger.info(f"[NET] Checking IP via proxy: {proxy}")
-                connector = ProxyConnector.from_url(proxy)
+                connector = get_connector_for_proxy(proxy)
             else:
                 connector = TCPConnector()
 
