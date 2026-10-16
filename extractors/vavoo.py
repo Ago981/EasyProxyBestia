@@ -321,8 +321,12 @@ class VavooExtractor(BaseExtractor):
             body = {"language": _LANGUAGE, "region": _REGION, "url": url, "clientVersion": "3.0.2"}
             try:
                 async with session.post(self._resolve_url, json=body, headers=headers,
-                                        timeout=ClientTimeout(total=30), ssl=False) as resp:
-                    if resp.status in (451, 502):
+                                        timeout=ClientTimeout(total=15), ssl=False) as resp:
+                    # Switch di base solo su errori potenzialmente legati alla
+                    # singola base (gateway/backend): gli altri 4xx (400/401/
+                    # 403/404/429) dipendono dalla richiesta, riprovarli
+                    # altrove spreca solo tentativi/ping (il 429 peggiora).
+                    if resp.status in (451, 502, 500, 503, 504):
                         last_err = f"HTTP {resp.status} on {_BASE_SITES[self.base_index]}"
                         logger.warning(f"Vavoo resolve status {resp.status}, switching base site")
                         self._switch_to_next_base()
