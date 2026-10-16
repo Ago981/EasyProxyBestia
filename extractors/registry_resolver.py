@@ -14,6 +14,16 @@ from config import (
 from extractors.generic import GenericHLSExtractor, ExtractorError
 from extractors.registry_imports import *
 
+try:
+    # Single source of truth (extractors/vavoo.py); fallback keeps the
+    # auto-detect working even if the vavoo module fails to import.
+    from extractors.vavoo import VAVOO_MIRROR_DOMAINS
+except Exception:
+    VAVOO_MIRROR_DOMAINS = (
+        "vavoo.to", "kool.to", "vavoo.net", "kool.ws",
+        "huhu.to", "oha.to", "voltop.net",
+    )
+
 logger = logging.getLogger("extractors.registry")
 
 _SPORTSONLINE_PATH_PATTERNS = (
@@ -477,9 +487,11 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                     request_headers, proxies=proxy_list
                 )
             return self.extractors[key]
-        elif "vavoo.to" in url:
+        elif any(d in url.lower() for d in VAVOO_MIRROR_DOMAINS):
             key = _cache_key("vavoo", bypass_warp)
-            proxy = get_proxy_for_url("vavoo.to", bypass_warp=bypass_warp)
+            if VavooExtractor is None:
+                raise RuntimeError("VavooExtractor module not available")
+            proxy = get_proxy_for_url(url, bypass_warp=bypass_warp, extractor_name="vavoo")
             proxy_list = _build_proxy_list(proxy, "vavoo")
             if key not in self.extractors:
                 self.extractors[key] = VavooExtractor(
