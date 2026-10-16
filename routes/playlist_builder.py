@@ -109,7 +109,10 @@ class PlaylistBuilder:
                 processed_url_content = logical_line
                 
                 if 'pluto.tv' in logical_line:
-                    processed_url_content = logical_line
+                    current_clearkey = None
+                    current_ext_headers = {}
+                    yield logical_line + '\n'
+                    continue
                 # Mirror frontend mediahubmx: stesso rewrite delle vavoo.to
                 elif any(d in logical_line for d in ('vavoo.to', 'kool.to', 'vavoo.net', 'kool.ws', 'huhu.to', 'oha.to', 'voltop.net')):
                     encoded_url = urllib.parse.quote(logical_line, safe='')
@@ -241,11 +244,6 @@ class PlaylistBuilder:
                         else:
                             options[k] = v.lower() == 'true'
                 playlist_configs.append({'url': url, 'options': options})
-            elif '&' in definition:
-                # Legacy support
-                parts = definition.split('&', 1)
-                url = parts[1] if len(parts) > 1 else parts[0]
-                playlist_configs.append({'url': url, 'options': {}})
             else:
                 playlist_configs.append({'url': definition, 'options': {}})
         
