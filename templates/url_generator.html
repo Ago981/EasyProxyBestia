@@ -1126,7 +1126,7 @@
 
                 const data = JSON.parse(text);
                 let urls = data.urls || [];
-                if (redirectStream || bypassWarp || proxyMode || disableSSL || maxRes) {
+                if (redirectStream || bypassWarp || proxyMode || disableSSL || maxRes || apiPassword) {
                     urls = urls.map(u => {
                         const urlObj = new URL(u);
                         if (redirectStream) urlObj.searchParams.set('redirect_stream', 'true');
@@ -1134,6 +1134,7 @@
                         if (proxyMode) urlObj.searchParams.set('proxy', proxyMode);
                         if (disableSSL) urlObj.searchParams.set('disable_ssl', '1');
                         if (maxRes) urlObj.searchParams.set('max_res', 'true');
+                        if (apiPassword) urlObj.searchParams.set('api_password', apiPassword);
                         return urlObj.toString();
                     });
                 }
@@ -1274,6 +1275,17 @@
                 try {
                     const data = JSON.parse(text);
                     if (data.urls) {
+                        const reqUrls = Array.isArray(payload.urls) ? payload.urls : [];
+                        data.urls = data.urls.map((u, i) => {
+                            const item = reqUrls[i] || {};
+                            const urlObj = new URL(u);
+                            if (item.disable_ssl === true || item.disable_ssl === 1 || item.disable_ssl === '1' || item.disable_ssl === 'true') {
+                                urlObj.searchParams.set('disable_ssl', '1');
+                            }
+                            if (apiPassword) urlObj.searchParams.set('api_password', apiPassword);
+                            return urlObj.toString();
+                        });
+                        result.value = JSON.stringify(data);
                         renderUrlList('batchUrlList', data.urls);
                     } else {
                         document.getElementById('batchUrlList').innerHTML = '';
