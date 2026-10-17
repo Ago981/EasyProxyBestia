@@ -15,8 +15,12 @@ from extractors.generic import GenericHLSExtractor, ExtractorError
 from extractors.registry_imports import *
 
 try:
-    # Single source of truth (extractors/vavoo.py); fallback keeps the
-    # auto-detect working even if the vavoo module fails to import.
+    # Single source of truth for the mirror frontends, defined next to the
+    # extractor itself (extractors/vavoo.py) so the two can't drift apart.
+    # Tuple, not list: it is a fixed shared constant imported by reference —
+    # any importer could accidentally mutate a list in place.
+    # The fallback duplicate only covers the case where the vavoo module
+    # fails to import, keeping auto-detect functional.
     from extractors.vavoo import VAVOO_MIRROR_DOMAINS
 except Exception:
     VAVOO_MIRROR_DOMAINS = (
@@ -503,10 +507,22 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                     request_headers, proxies=proxy_list, bypass_warp=bypass_warp
                 )
             return self.extractors[key]
+        # Every mirror frontend shares the same mediahubmx backend (same
+        # signature, same catalog, cross-compatible resolve), so auto-detect
+        # must route all of them, not just vavoo.to. url.lower() keeps
+        # uppercase variants matching too.
         elif any(d in url.lower() for d in VAVOO_MIRROR_DOMAINS):
             key = _cache_key("vavoo", bypass_warp)
+            # registry_imports sets VavooExtractor=None when the module fails
+            # to load: fail with a clear error instead of a TypeError from
+            # calling None.
             if VavooExtractor is None:
                 raise RuntimeError("VavooExtractor module not available")
+            # Pass the real URL + extractor_name (never the "vavoo.to"
+            # literal): the routing layer must see the actual host for
+            # TRANSPORT_ROUTES substring matching, warp/proxy_exclude_domains
+            # hostname parsing and per-extractor proxy resolution
+            # (AGENTS.md contract).
             proxy = get_proxy_for_url(url, bypass_warp=bypass_warp, extractor_name="vavoo")
             proxy_list = _build_proxy_list(proxy, "vavoo")
             if key not in self.extractors:
