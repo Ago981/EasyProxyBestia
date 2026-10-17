@@ -235,6 +235,9 @@ class DLStreamsExtractor(BaseExtractor):
     STREAM_CACHE_STALE_SECONDS = 300.0
     STREAM_CACHE_FAIL_BACKOFF_SECONDS = 15.0
     MAX_HOST_BACKOFF_SECONDS = 3600.0
+    # Channels whose first player is pinned by hand (see _build_player_urls).
+    # The recorded player preference must never override that pin.
+    PLAYER1_FIRST_CHANNELS = frozenset({"861"})
 
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
         super().__init__(request_headers or {}, proxies, extractor_name="dlstreams", bypass_warp=bypass_warp)
@@ -331,7 +334,12 @@ class DLStreamsExtractor(BaseExtractor):
         # sets, which players report as "media sequence changed unexpectedly"
         # plus "non-existing SPS/PPS" and a frozen/green picture.
         pinned = self._player_preference.get(channel_id)
-        if pinned in players and players[0] != pinned and requested_player not in players:
+        if (
+            pinned in players
+            and players[0] != pinned
+            and requested_player not in players
+            and channel_id not in self.PLAYER1_FIRST_CHANNELS
+        ):
             players.remove(pinned)
             players.insert(0, pinned)
         return players
@@ -418,7 +426,7 @@ class DLStreamsExtractor(BaseExtractor):
         # playback shows green/black with working audio. The failure only surfaces at
         # decode time, which no proxy-side check can afford to replicate -- every
         # simpler approach was tried and discarded, this pin is the fix.
-        first = "stream" if channel_id == "861" else "cast"
+        first = "stream" if channel_id in self.PLAYER1_FIRST_CHANNELS else "cast"
         second = "cast" if channel_id == "861" else "stream"
         return [
             f"{origin}/{first}/stream-{channel_id}.php",
@@ -878,7 +886,8 @@ class DLStreamsExtractor(BaseExtractor):
                     session, stream_url, playback_headers, budget=_remaining()
                 ):
                     logger.info("DLStreams: working stream found via %s", candidate)
-                    self._player_preference[channel_id] = candidate
+                    if channel_id not in self.PLAYER1_FIRST_CHANNELS:
+                        self._player_preference[channel_id] = candidate
                     result = self._build_result(stream_url, playback_headers)
                     result["_validated"] = True
                     return result
