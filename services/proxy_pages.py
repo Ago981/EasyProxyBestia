@@ -682,9 +682,9 @@ class HLSProxyPagesMixin:
                 "/proxy/hls/segment.{format}": {
                     "get": {
                         "summary": "HLS segment compatibility",
-                        "description": "Serve HLS segments (ts, m4s, mp4, vtt) through the proxy with proper headers.",
+                        "description": "Serve HLS segments (ts, m4s, mp4, vtt, aac, mp3, m4a, ac3, ec3) through the proxy with proper headers.",
                         "parameters": [
-                            {"name": "format", "in": "path", "schema": {"type": "string", "enum": ["ts", "m4s", "mp4", "vtt"]}, "required": True},
+                            {"name": "format", "in": "path", "schema": {"type": "string", "enum": ["ts", "m4s", "mp4", "vtt", "aac", "mp3", "m4a", "ac3", "ec3"]}, "required": True},
                         ],
                         "responses": {"200": {"description": "Segment data"}},
                     }

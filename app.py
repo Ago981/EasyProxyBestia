@@ -101,6 +101,11 @@ def create_app():
     app.router.add_get('/proxy/hls/segment.m4s', proxy.handle_proxy_request)
     app.router.add_get('/proxy/hls/segment.mp4', proxy.handle_proxy_request)
     app.router.add_get('/proxy/hls/segment.vtt', proxy.handle_proxy_request)
+    app.router.add_get('/proxy/hls/segment.aac', proxy.handle_proxy_request)
+    app.router.add_get('/proxy/hls/segment.mp3', proxy.handle_proxy_request)
+    app.router.add_get('/proxy/hls/segment.m4a', proxy.handle_proxy_request)
+    app.router.add_get('/proxy/hls/segment.ac3', proxy.handle_proxy_request)
+    app.router.add_get('/proxy/hls/segment.ec3', proxy.handle_proxy_request)
     
     app.router.add_get('/playlist', proxy.handle_playlist_request)
     app.router.add_get('/segment/{tail:.*}', proxy.handle_ts_segment)
