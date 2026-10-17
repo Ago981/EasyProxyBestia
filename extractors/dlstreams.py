@@ -93,7 +93,7 @@ class DLStreamsExtractor(BaseExtractor):
     MAX_HOST_BACKOFF_SECONDS = 3600.0
 
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
-        super().__init__(request_headers or {}, proxies, extractor_name="dlstreams")
+        super().__init__(request_headers or {}, proxies, extractor_name="dlstreams", bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
         self.entry_origin = ""
         self.stream_origin = ""

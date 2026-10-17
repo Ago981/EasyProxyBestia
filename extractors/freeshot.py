@@ -18,8 +18,8 @@ class FreeshotExtractor(BaseExtractor):
     MAX_RETRIES = 3
     RETRY_DELAYS = [1, 2, 4]  # Exponential backoff in seconds
     
-    def __init__(self, request_headers=None, proxies=None):
-        super().__init__(request_headers or {}, proxies, extractor_name="freeshot")
+    def __init__(self, request_headers=None, proxies=None, bypass_warp: bool = False):
+        super().__init__(request_headers or {}, proxies, extractor_name="freeshot", bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
         self.base_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",

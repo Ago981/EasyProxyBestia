@@ -70,8 +70,8 @@ class SportsonlineExtractor(BaseExtractor):
     STREAM_CACHE_FAIL_BACKOFF_SECONDS = 15.0
     MAX_HOST_BACKOFF_SECONDS = 3600.0
 
-    def __init__(self, request_headers: dict, proxies: list = None):
-        super().__init__(request_headers or {}, proxies, extractor_name="sportsonline")
+    def __init__(self, request_headers: dict, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers or {}, proxies, extractor_name="sportsonline", bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
         self.base_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

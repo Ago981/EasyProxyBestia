@@ -25,8 +25,8 @@ class DoodStreamExtractor(BaseExtractor):
     DoodStream / PlayMogo extractor.
     """
 
-    def __init__(self, request_headers: dict = None, proxies: list = None):
-        super().__init__(request_headers or {}, proxies, extractor_name="doodstream")
+    def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers or {}, proxies, extractor_name="doodstream", bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
         self.base_headers = self.request_headers.copy()
         self.base_headers["User-Agent"] = _DOOD_UA

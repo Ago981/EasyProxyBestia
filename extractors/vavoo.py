@@ -33,8 +33,8 @@ _REGION = "DE"
 class VavooExtractor(BaseExtractor):
     """Vavoo URL extractor — resolves vavoo.to play URLs to clean HLS via lokke.app auth."""
 
-    def __init__(self, request_headers: dict, proxies: list = None):
-        super().__init__(request_headers, proxies, extractor_name="vavoo")
+    def __init__(self, request_headers: dict, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers, proxies, extractor_name="vavoo", bypass_warp=bypass_warp)
         self.request_headers = request_headers
         self.base_headers = {
             "user-agent": "okhttp/4.11.0"
@@ -46,6 +46,7 @@ class VavooExtractor(BaseExtractor):
         self._proxy = None  # scelto una volta, non cambia
         self.addon_sig = None
         self.addon_sig_ts = 0
+        self._addon_sig_proxy = None
         self.base_index = 0
 
     @property
@@ -241,19 +242,23 @@ class VavooExtractor(BaseExtractor):
         return None
 
     async def _get_sig(self, force: bool = False) -> Optional[str]:
+        await self._get_session()
         now = time.time()
-        if self.addon_sig and not force and (now - self.addon_sig_ts < _TOKEN_REFRESH_AGE):
+        proxy_changed = getattr(self, "_addon_sig_proxy", None) != self._proxy
+        if self.addon_sig and not force and not proxy_changed and (now - self.addon_sig_ts < _TOKEN_REFRESH_AGE):
             return self.addon_sig
         sig = await self._fetch_addon_sig()
         if not sig:
-            if self.addon_sig:
+            if self.addon_sig and not proxy_changed:
                 logger.warning("Vavoo token refresh failed, reusing old addonSig")
-            return self.addon_sig
+                return self.addon_sig
+            return None
         client_ip = await self._get_external_ip()
         if client_ip:
             sig = self._rewrite_addon_sig_ip(sig, client_ip)
         self.addon_sig = sig
         self.addon_sig_ts = now
+        self._addon_sig_proxy = self._proxy
         logger.info("Vavoo addonSig obtained")
         return sig
 

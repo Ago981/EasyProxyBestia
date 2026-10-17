@@ -684,22 +684,23 @@ function updateSpeedtestButtons(cfg) {
 function renderSpeedtestResults(data) {
     const result = document.getElementById('speedtest-result');
     result.style.display = 'block';
-    if (data.error) { result.innerHTML = 'Error: ' + data.error; return; }
+    if (data.error) { result.innerHTML = 'Error: ' + escHtml(data.error); return; }
     if (!data.results || !data.results.length) { result.innerHTML = 'No results (run not started?)'; return; }
     result.innerHTML = '<div>' + data.results.map(function(r) {
             if (r.error) {
                 return '<div class="speedtest-card error">' +
-                    '<div style="font-weight:600;font-size:0.8rem;margin-bottom:4px">' + r.name + '</div>' +
-                    '<div style="color:var(--accent-error);font-size:0.7rem">❌ ' + r.error.slice(0, 120) + '</div></div>';
+                    '<div style="font-weight:600;font-size:0.8rem;margin-bottom:4px">' + escHtml(r.name) + '</div>' +
+                    '<div style="color:var(--accent-error);font-size:0.7rem">❌ ' + escHtml(String(r.error).slice(0, 120)) + '</div></div>';
             }
+            const srv = r.server || {};
             return '<div class="speedtest-card">' +
-                '<div style="font-weight:600;font-size:0.8rem;margin-bottom:4px">' + r.name + '</div>' +
-                (r.proxy_used ? '<div style="font-size:0.65rem;color:var(--accent-warning);margin-bottom:2px">📡 ' + r.proxy_used + '</div>' : '') +
-                (r.external_ip ? '<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:2px">Exit IP: ' + r.external_ip + '</div>' : '') +
-                '<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:4px">' + (r.server.sponsor && r.server.sponsor !== 'Unknown' ? r.server.sponsor + ' · ' : '') + r.server.location + '</div>' +
-                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">Ping</span><span style="color:var(--accent-primary)">' + r.ping_ms + ' ms</span></div>' +
-                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">⬇ Download</span><span style="color:var(--accent-success);font-weight:700">' + r.download_mbps + ' Mbps</span></div>' +
-                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">⬆ Upload</span><span style="color:var(--accent-success);font-weight:700">' + r.upload_mbps + ' Mbps</span></div>' +
+                '<div style="font-weight:600;font-size:0.8rem;margin-bottom:4px">' + escHtml(r.name) + '</div>' +
+                (r.proxy_used ? '<div style="font-size:0.65rem;color:var(--accent-warning);margin-bottom:2px">📡 ' + escHtml(r.proxy_used) + '</div>' : '') +
+                (r.external_ip ? '<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:2px">Exit IP: ' + escHtml(r.external_ip) + '</div>' : '') +
+                '<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:4px">' + (srv.sponsor && srv.sponsor !== 'Unknown' ? escHtml(srv.sponsor) + ' · ' : '') + escHtml(srv.location) + '</div>' +
+                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">Ping</span><span style="color:var(--accent-primary)">' + escHtml(r.ping_ms) + ' ms</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">⬇ Download</span><span style="color:var(--accent-success);font-weight:700">' + escHtml(r.download_mbps) + ' Mbps</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem"><span style="color:var(--text-muted)">⬆ Upload</span><span style="color:var(--accent-success);font-weight:700">' + escHtml(r.upload_mbps) + ' Mbps</span></div>' +
             '</div>';
     }).join('') + '</div>';
 }
@@ -968,8 +969,8 @@ function renderExtractorProxies() {
         div.innerHTML = `
             <span class="name">${escHtml(name)}</span>
             ${modeLabel}
-            <input type="text" value="${escHtml(value)}" onchange="updateExtractorProxy('${escHtml(name)}', this.value)">
-            <button class="btn btn-danger btn-sm" onclick="removeExtractorProxy('${escHtml(name)}')">✕</button>
+            <input type="text" value="${escHtml(value)}" data-name="${escHtml(name)}" onchange="updateExtractorProxy(this.dataset.name, this.value)">
+            <button class="btn btn-danger btn-sm" data-name="${escHtml(name)}" onclick="removeExtractorProxy(this.dataset.name)">✕</button>
         `;
         container.appendChild(div);
     }
@@ -1379,7 +1380,7 @@ function renderExcludeDomains() {
     for (const domain of custom) {
         const div = document.createElement('div');
         div.className = 'extractor-row';
-        div.innerHTML = `<span>${escHtml(domain)}</span><button class="btn btn-danger btn-sm" onclick="removeExcludeDomain('${escHtml(domain)}')">✕</button>`;
+        div.innerHTML = `<span>${escHtml(domain)}</span><button class="btn btn-danger btn-sm" data-domain="${escHtml(domain)}" onclick="removeExcludeDomain(this.dataset.domain)">✕</button>`;
         container.appendChild(div);
     }
 }
@@ -1418,7 +1419,7 @@ function renderProxyExcludeDomains() {
     for (const domain of custom) {
         const div = document.createElement('div');
         div.className = 'extractor-row';
-        div.innerHTML = `<span>${escHtml(domain)}</span><button class="btn btn-danger btn-sm" onclick="removeProxyExcludeDomain('${escHtml(domain)}')">✕</button>`;
+        div.innerHTML = `<span>${escHtml(domain)}</span><button class="btn btn-danger btn-sm" data-domain="${escHtml(domain)}" onclick="removeProxyExcludeDomain(this.dataset.domain)">✕</button>`;
         container.appendChild(div);
     }
 }

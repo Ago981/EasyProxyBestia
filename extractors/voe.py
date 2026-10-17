@@ -8,8 +8,8 @@ from extractors.base import BaseExtractor, ExtractorError
 logger = logging.getLogger(__name__)
 
 class VoeExtractor(BaseExtractor):
-    def __init__(self, request_headers: dict, proxies: list = None):
-        super().__init__(request_headers, proxies, extractor_name="voe")
+    def __init__(self, request_headers: dict, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers, proxies, extractor_name="voe", bypass_warp=bypass_warp)
 
     async def _fetch_external_scripts(self, url: str, text: str) -> list[str]:
         """Fetch all external JS files linked in the page and return their content."""

@@ -36,8 +36,8 @@ _RUNNER = os.path.join(
 class VidXgoExtractor(BaseExtractor):
     """VidXgo embed -> HLS extractor (Node tls-client runner)."""
 
-    def __init__(self, request_headers: dict = None, proxies: list = None, extractor_name: str = "vidxgo"):
-        super().__init__(request_headers, proxies, extractor_name=extractor_name)
+    def __init__(self, request_headers: dict = None, proxies: list = None, extractor_name: str = "vidxgo", bypass_warp: bool = False):
+        super().__init__(request_headers, proxies, extractor_name=extractor_name, bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
         self.selected_proxy = None
 

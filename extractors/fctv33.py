@@ -445,7 +445,7 @@ class Fctv33Extractor(BaseExtractor):
     """
 
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
-        super().__init__(request_headers or {}, proxies=proxies, extractor_name="fctv33")
+        super().__init__(request_headers or {}, proxies=proxies, extractor_name="fctv33", bypass_warp=bypass_warp)
         self.base_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "*/*",

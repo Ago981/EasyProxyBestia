@@ -109,14 +109,19 @@ def _save():
     with _lock:
         if _config_data is None:
             return
+        tmp_file = f"{_CONFIG_FILE}.tmp.{os.getpid()}.{threading.get_ident()}"
         try:
             os.makedirs(_CONFIG_DIR, exist_ok=True)
-            tmp_file = f"{_CONFIG_FILE}.tmp.{os.getpid()}.{threading.get_ident()}"
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(_config_data, f, indent=2)
             os.replace(tmp_file, _CONFIG_FILE)
         except Exception as e:
             logger.error("Failed to save config.json: %s", e)
+            try:
+                if os.path.exists(tmp_file):
+                    os.remove(tmp_file)
+            except OSError:
+                pass
 
 
 def get(key, default=None):

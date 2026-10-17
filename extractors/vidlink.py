@@ -30,8 +30,8 @@ _UA = (
 class VidLinkExtractor(BaseExtractor):
     """Resolve VidLink movie/TV embeds to their highest-quality stream."""
 
-    def __init__(self, request_headers: dict, proxies: list = None):
-        super().__init__(request_headers, proxies, extractor_name="vidlink")
+    def __init__(self, request_headers: dict, proxies: list = None, bypass_warp: bool = False):
+        super().__init__(request_headers, proxies, extractor_name="vidlink", bypass_warp=bypass_warp)
         self.request_headers = request_headers or {}
 
     @staticmethod

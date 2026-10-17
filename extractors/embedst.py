@@ -32,7 +32,7 @@ class EmbedStExtractor(BaseExtractor):
     curl_only = True
 
     def __init__(self, request_headers: dict, proxies: list = None, bypass_warp: bool = False):
-        super().__init__(request_headers, proxies, extractor_name="embedst")
+        super().__init__(request_headers, proxies, extractor_name="embedst", bypass_warp=bypass_warp)
         self.bypass_warp_active = bypass_warp
         self.mediaflow_endpoint = "hls_manifest_proxy"
         self._curl_session = None
@@ -57,7 +57,7 @@ class EmbedStExtractor(BaseExtractor):
         if not os.path.exists(_RUNNER):
             raise ExtractorError(f"EmbedSt: runner script not found at {_RUNNER}")
 
-        self._forced_proxy = _cfg.effective_forced_proxy(url, self._forced_proxy)
+        self._apply_routing_kwargs(url, kwargs)
         proxy = await self._resolve_proxy(url)
         runner_proxy = await get_http_bridge_for_proxy(proxy)
         if proxy and not runner_proxy:
