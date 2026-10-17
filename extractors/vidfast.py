@@ -154,6 +154,7 @@ class VidFastExtractor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                start_new_session=os.name != "nt",
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
         except FileNotFoundError as exc:
@@ -163,9 +164,13 @@ class VidFastExtractor:
         finally:
             if proc and proc.returncode is None:
                 try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
+                    if os.name != "nt":
+                        import signal
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                    await asyncio.wait_for(proc.wait(), timeout=2)
+                except BaseException:
                     pass
 
         raw = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
