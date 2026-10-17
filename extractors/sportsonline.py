@@ -209,11 +209,12 @@ class SportsonlineExtractor(BaseExtractor):
     async def _get_session(self, url: str = None, force_direct: bool = False):
         force_direct = force_direct or self._force_direct
         if force_direct:
-            if not _cfg.is_direct_connection_allowed():
+            if not self._force_direct and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
                 raise aiohttp.ClientConnectionError(
                     "Sportsonline: implicit direct fallback disabled"
                 )
             proxy = None
+            self.last_used_proxy = None
         else:
             forced = _cfg.effective_forced_proxy(url, self._forced_proxy)
             if forced:
@@ -223,7 +224,7 @@ class SportsonlineExtractor(BaseExtractor):
                 proxy = await get_preferred_proxy_for_url(url, "sportsonline", self.proxies, self.bypass_warp_active)
                 self.last_used_proxy = proxy
 
-        if proxy is None and not _cfg.is_direct_connection_allowed():
+        if proxy is None and not self._force_direct and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
             raise aiohttp.ClientConnectionError(
                 "Sportsonline: direct fallback disabled; no proxy route available"
             )

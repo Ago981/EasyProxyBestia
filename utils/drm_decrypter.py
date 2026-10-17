@@ -844,9 +844,7 @@ class MP4Decrypter:
             if atom.atom_type == b"schi":
                 schi_parser = MP4Parser(atom.data)
                 for schi_atom in iter(schi_parser.read_atom, None):
-                    if schi_atom.atom_type == b"tenc" and len(schi_atom.data) >= 24:
-                        if schi_atom.data[0] == 1 and len(schi_atom.data) >= 20:
-                            return bytes(schi_atom.data[4:20])
+                    if schi_atom.atom_type == b"tenc" and len(schi_atom.data) >= 24 and schi_atom.data[0] in (0, 1):
                         return bytes(schi_atom.data[8:24])
         return None
 

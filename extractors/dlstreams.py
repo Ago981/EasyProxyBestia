@@ -724,12 +724,15 @@ class DLStreamsExtractor(BaseExtractor):
     async def _get_session(self, url: str | None = None):
         # Determine the correct proxy for the current state
         target_url = url or self.stream_origin or self.entry_origin
-        forced = None if self._force_direct else _cfg.effective_forced_proxy(target_url, self._forced_proxy)
-        if forced:
-            proxy_url = forced
+        if self._force_direct:
+            proxy_url = None
         else:
-            proxy_url = await get_preferred_proxy_for_url(target_url, "dlstreams", self.proxies, self.bypass_warp_active)
-        if proxy_url is None and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
+            forced = _cfg.effective_forced_proxy(target_url, self._forced_proxy)
+            if forced:
+                proxy_url = forced
+            else:
+                proxy_url = await get_preferred_proxy_for_url(target_url, "dlstreams", self.proxies, self.bypass_warp_active)
+        if proxy_url is None and not self._force_direct and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
             raise ExtractorError(
                 "DLStreams: no usable proxy route; direct fallback disabled "
                 f"[{self._route_diagnostic(target_url)}]"

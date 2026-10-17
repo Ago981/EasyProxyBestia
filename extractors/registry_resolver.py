@@ -139,7 +139,7 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                         request_headers, proxies=proxy_list
                     )
                 return self.extractors[key]
-            elif _is_sportsonline_candidate(host):
+            elif host == "sportsonline" or _is_sportsonline_candidate(host):
                 key = _cache_key("sportsonline", bypass_warp)
                 if key not in self.extractors:
                     self.extractors[key] = SportsonlineExtractor(
@@ -328,12 +328,23 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                     )
                 return self.extractors[key]
             elif host in {"vidfast", "vidfast.vc"}:
+                key = _cache_key("vidfast", bypass_warp)
                 if VidFastExtractor is None:
                     raise RuntimeError("VidFastExtractor module not available")
                 if key not in self.extractors:
                     self.extractors[key] = VidFastExtractor(
+                        request_headers, proxies=proxy_list, bypass_warp=bypass_warp
+                    )
+                return self.extractors[key]
+            elif host == "vidxgo":
+                key = _cache_key("vidxgo", bypass_warp)
+                if VidXgoExtractor is None:
+                    raise RuntimeError("VidXgoExtractor module not available")
+                if key not in self.extractors:
+                    self.extractors[key] = VidXgoExtractor(
                         request_headers, proxies=proxy_list
                     )
+                self.extractors[key].request_headers = request_headers
                 return self.extractors[key]
             elif host == "cinejoy" or host.startswith("cinejoy."):
                 key = _cache_key("cinejoy", bypass_warp)
@@ -848,7 +859,7 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
                 raise RuntimeError("VidFastExtractor module not available")
             if key not in self.extractors:
                 self.extractors[key] = VidFastExtractor(
-                    request_headers, proxies=proxy_list
+                    request_headers, proxies=proxy_list, bypass_warp=bypass_warp
                 )
             return self.extractors[key]
         elif re.search(r"(?:www\.)?cinejoy\.[a-z]{2,}/", url, re.IGNORECASE):

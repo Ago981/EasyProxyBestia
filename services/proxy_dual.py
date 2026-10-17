@@ -1032,6 +1032,7 @@ class HLSProxyDualMixin:
                         raise DualLinksError(502, "DUAL service did not return a fallback session token")
             except BaseException:
                 prepared_task.cancel()
+                await asyncio.gather(prepared_task, return_exceptions=True)
                 raise
             prepared = await prepared_task
             audio_hid = str(prepared.get("hid") or "")
@@ -1042,15 +1043,17 @@ class HLSProxyDualMixin:
             prepared["url"] = dual_service._audio_url(request, audio_hid, token)
             if synced is None or str(synced.get("status") or "") != "ok":
                 synced = await self._dual_sync_json(request, sync_body(prepared))
-        finally:
-            _unpin_all()
-        status = str(synced.get("status") or "")
-        if status != "ok":
+            status = str(synced.get("status") or "")
+            if status != "ok":
+                detail = synced.get("message") or synced.get("detail") or "DUAL sync failed"
+                raise DualLinksError(409, str(detail))
+        except BaseException:
             for t in subtitle_tasks:
                 t.cancel()
             await asyncio.gather(*subtitle_tasks, return_exceptions=True)
-            detail = synced.get("message") or synced.get("detail") or "DUAL sync failed"
-            raise DualLinksError(409, str(detail))
+            raise
+        finally:
+            _unpin_all()
         subtitle_items = [
             {
                 **entry,

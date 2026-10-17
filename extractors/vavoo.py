@@ -100,23 +100,18 @@ class VavooExtractor(BaseExtractor):
                 direct_allowed,
             )
 
-            if (
-                self.session is not None
-                and not self.session.closed
-                and self._proxy == selected_proxy
-            ):
-                return self.session
-
-            if self.session is not None and not self.session.closed:
-                await self.session.close()
-            self.session = None
             self._proxy = selected_proxy
             self.last_used_proxy = selected_proxy
 
-            if self._proxy is None and not direct_allowed:
+            if self._proxy is None and not self._force_direct and not direct_allowed:
                 raise ClientConnectionError(
                     "Vavoo: direct fallback disabled; no proxy route available"
                 )
+
+            session = self._route_sessions.get(selected_proxy)
+            if session is not None and not session.closed:
+                self.session = session
+                return self.session
 
             timeout = ClientTimeout(total=60, connect=30, sock_read=30)
 
@@ -143,6 +138,7 @@ class VavooExtractor(BaseExtractor):
                 connector=connector,
                 headers={'User-Agent': self.base_headers["user-agent"]}
             )
+            self._route_sessions[selected_proxy] = self.session
         return self.session
 
     async def _get_external_ip(self) -> Optional[str]:
@@ -352,6 +348,11 @@ class VavooExtractor(BaseExtractor):
 
     async def close(self):
         async with self._session_lock:
-            if self.session and not self.session.closed:
-                await self.session.close()
+            sessions = set(self._route_sessions.values())
+            if self.session is not None:
+                sessions.add(self.session)
+            for session in sessions:
+                if not session.closed:
+                    await session.close()
+            self._route_sessions.clear()
             self.session = None

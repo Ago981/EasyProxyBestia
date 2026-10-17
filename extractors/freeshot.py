@@ -38,23 +38,21 @@ class FreeshotExtractor(BaseExtractor):
         else:
             forced = _cfg.effective_forced_proxy(url, self._forced_proxy)
             proxy = forced or await get_preferred_proxy_for_url(url, "freeshot", self.proxies, self.bypass_warp_active)
-        if proxy is None and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
+        if proxy is None and not self._force_direct and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
             raise aiohttp.ClientConnectionError(
                 "Freeshot: direct fallback disabled; no proxy route available"
             )
         self.last_used_proxy = proxy
-        if (
-            self.session is None
-            or self.session.closed
-            or self._session_proxy != proxy
-        ):
-            if self.session and not self.session.closed:
-                await self.session.close()
-            connector = get_connector_for_proxy(proxy, ssl=False) if proxy else TCPConnector(ssl=False, limit=0, use_dns_cache=True)
-            timeout = ClientTimeout(total=30)
-            self.session = ClientSession(connector=connector, timeout=timeout)
+        async with self._session_lock:
+            session = self._route_sessions.get(proxy)
+            if session is None or session.closed:
+                connector = get_connector_for_proxy(proxy, ssl=False) if proxy else TCPConnector(ssl=False, limit=0, use_dns_cache=True)
+                timeout = ClientTimeout(total=30)
+                session = ClientSession(connector=connector, timeout=timeout)
+                self._route_sessions[proxy] = session
+            self.session = session
             self._session_proxy = proxy
-        return self.session
+            return self.session
 
     async def _fetch_text(self, url: str, headers: dict) -> str:
         session = await self._get_session(url)
@@ -196,5 +194,4 @@ class FreeshotExtractor(BaseExtractor):
         }
 
     async def close(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
+        await super().close()

@@ -56,6 +56,9 @@ class VidXgoExtractor(BaseExtractor):
     def _normalize_proxy(proxy: str | None) -> str:
         if not proxy:
             return ""
+        proxy = _cfg.resolve_proxy_alias(str(proxy).strip()) or str(proxy).strip()
+        if "://" not in proxy:
+            proxy = f"socks5://{proxy}"
         return proxy.replace("socks5h://", "socks5://", 1)
 
     _normalize_proxy_url = _normalize_proxy
@@ -75,7 +78,7 @@ class VidXgoExtractor(BaseExtractor):
             proxy = _cfg.effective_forced_proxy(url, self._forced_proxy) or await get_preferred_proxy_for_url(
                 url, self.extractor_name, self.proxies, self.bypass_warp_active
             )
-        if proxy is None and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
+        if proxy is None and not self._force_direct and not _cfg.is_direct_connection_allowed(self.bypass_warp_active):
             raise ExtractorError("VidXgo: direct fallback disabled; no proxy route available")
         self.selected_proxy = proxy
         self.last_used_proxy = proxy
