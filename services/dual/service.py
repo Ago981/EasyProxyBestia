@@ -203,8 +203,27 @@ async def prepare_audio(request: web.Request) -> web.Response:
 
 
 async def cache_status(request: web.Request) -> web.Response:
-    """Return real remote cache state for Toast Stream's manifest labels."""
+    """Return remote cache state for Toast Stream's manifest labels.
+
+    Sending the dual descriptor (``d=``, the same one the manifest call uses)
+    makes the answer exact: the video/audio identity is resolved and looked up,
+    so ``cached`` means the stored measurement is really reusable.  Without it
+    the check stays video-level (any stored audio) and reports ``exact=false``.
+    """
     body = await _json_body(request)
+    descriptor = str(request.query.get("d") or body.get("d") or "").strip()
+    proxy = request.app.get("proxy") if request.app is not None else None
+    if descriptor and proxy is not None:
+        result = await proxy.dual_cache_status({**body, "d": descriptor})
+        return _json({
+            "offset": {
+                "cached": bool(result.get("cached")),
+                "status": result.get("status"),
+                "updated_at": result.get("updated_at"),
+            },
+            "exact": bool(result.get("exact")),
+        })
+
     media_key = str(body.get("mediaKey") or body.get("media_key") or "")
     try:
         resolution = int(body.get("resolution") or 0)
@@ -225,6 +244,7 @@ async def cache_status(request: web.Request) -> web.Response:
             "status": offset.get("status") if offset else None,
             "updated_at": offset.get("updated_at") if offset else None,
         },
+        "exact": False,
     })
 
 

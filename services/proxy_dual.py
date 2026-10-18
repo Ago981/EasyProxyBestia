@@ -613,6 +613,92 @@ class HLSProxyDualMixin:
             return None
         return {"status": "ok", "cached": True, **details, "cache_key": cache_key}
 
+    async def dual_cache_status(self, body: dict) -> dict:
+        """Exact cache state for /dual/cache/status when the caller sends ``d``.
+
+        Resolves the same identity the manifest flow uses (selected video
+        variant + selected and parsed audio playlist) so ``cached`` is only true
+        when the stored measurement is reusable for this exact pair.  Without a
+        usable descriptor it answers ``exact=False`` and never guesses.
+        """
+        try:
+            payload = HLSProxyDualMixin._decode_dual_descriptor(body.get("d"))
+        except Exception as exc:  # noqa: BLE001 - unreadable descriptor
+            logger.debug("[DUAL] cache status: descriptor not usable: %s", exc)
+            return {"cached": False, "status": None, "updated_at": None, "exact": False}
+
+        requested_audio_lang = str(
+            payload.get("audio_lang") or payload.get("audioLanguage") or ""
+        ).strip()
+        bypass_audio_language = payload.get(
+            "bypass_audio_language", payload.get("audio_language_bypass", False)
+        )
+        bypass_audio_language = (
+            bypass_audio_language is True
+            or str(bypass_audio_language).strip().lower() in {"1", "true", "yes", "on"}
+        )
+        audio_lang = _normalise_language(requested_audio_lang)
+        video_spec = payload.get("video") or payload.get("video_url")
+        audio_spec = payload.get("audio") or payload.get("audio_url")
+        if audio_lang not in _LANGUAGE_ALIASES or not video_spec or not audio_spec:
+            return {"cached": False, "status": None, "updated_at": None, "exact": False}
+        requested_resolution = int(payload.get("resolution") or 2160)
+
+        try:
+            required_video_resolution = 2160 if requested_resolution >= 2160 else 0
+            if required_video_resolution:
+                video_coro = self._resolve_dual_spec_coalesced(
+                    video_spec, required_resolution=required_video_resolution)
+            else:
+                video_coro = self._resolve_dual_spec_coalesced(video_spec)
+            video, audio = await self._gather_dual_pair(
+                video_coro, self._resolve_dual_spec_coalesced(audio_spec))
+            (video_text, video_base), (audio_text, audio_base) = await self._gather_dual_pair(
+                self._manifest(video), self._manifest(audio))
+            _video_url, resolution, _auto_ref, _muxed_ref = self._pick_video(
+                video_text, video_base, requested_resolution)
+            selected_audio_url, _audio_meta = HLSProxyDualMixin._pick_audio(
+                audio_text, audio_base, audio_lang, requested_audio_lang,
+                bypass_audio_language)
+            audio_media = dict(audio)
+            audio_media["url"] = selected_audio_url
+            audio_media["manifest"] = ""
+            audio_playlist, audio_playlist_base = await self._manifest(audio_media)
+            segments, _parts, _crypto = dual_service.audio._parse_playlist(
+                audio_playlist, audio_playlist_base)
+            audio_fingerprint = dual_service.audio.source_fingerprint(segments)
+        except Exception as exc:  # noqa: BLE001 - sources not resolvable right now
+            logger.info(
+                "[DUAL] cache status: sources not resolvable (%s), reporting not-exact",
+                type(exc).__name__,
+            )
+            return {"cached": False, "status": None, "updated_at": None, "exact": False}
+
+        media_key = str(payload.get("media_key") or payload.get("mediaKey") or "").strip()
+        if not media_key:
+            media_key = hashlib.sha1(
+                self._stable_spec_id(video_spec).encode()).hexdigest()[:24]
+        video_fingerprint = str(payload.get("video_fingerprint") or "").strip()
+        if not video_fingerprint:
+            video_fingerprint = hashlib.sha1(
+                f"video|{self._stable_spec_id(video_spec)}".encode()).hexdigest()[:20]
+
+        cache_key = dual_service.offsets.key(
+            media_key, resolution, video_fingerprint, audio_fingerprint)
+        entry = await dual_service.offsets.lookup({
+            "cache_key": cache_key,
+            "media_key": media_key,
+            "resolution": resolution,
+            "video_fingerprint": video_fingerprint,
+            "audio_fingerprint": audio_fingerprint,
+        })
+        return {
+            "cached": bool(entry and str(entry.get("status") or "").lower() == "ok"),
+            "status": (entry or {}).get("status"),
+            "updated_at": (entry or {}).get("updated_at"),
+            "exact": True,
+        }
+
     async def _prepare_dual_audio(
         self,
         request,
