@@ -16,7 +16,6 @@ from extractors.base import BaseExtractor, ExtractorError
 logger = logging.getLogger(__name__)
 
 # Tokens expire every 10 minutes (see vavoo_proxy.py TOKEN_ADDON_SIG)
-_TOKEN_MAX_AGE = 600
 _TOKEN_REFRESH_AGE = 480
 _PING_URLS = [
     "https://www.vavoo.tv/api/app/ping",

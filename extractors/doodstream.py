@@ -207,12 +207,5 @@ class DoodStreamExtractor(BaseExtractor):
         final_url = f"{base_stream}{rand_str}?token={token}&expiry={expiry}"
 
         logger.info(f"DoodStream successful sniffed extraction: {final_url[:60]}...")
-        return {
-            "destination_url": final_url,
-            "request_headers": {"User-Agent": ua, "Referer": f"{base_url}/", "Accept": "*/*"},
-            "mediaflow_endpoint": self.mediaflow_endpoint,
-            "selected_proxy": self.last_used_proxy,
-            "force_direct": self._force_direct,
-            "bypass_warp": self.bypass_warp_active,
-        }
+        return self._result(final_url, {"User-Agent": ua, "Referer": f"{base_url}/", "Accept": "*/*"})
 

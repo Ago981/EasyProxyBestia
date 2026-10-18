@@ -200,19 +200,6 @@ async def prepare_audio(request: web.Request) -> web.Response:
     return _json(await prepare_audio_data(body, request))
 
 
-async def cached_audio(request: web.Request) -> web.Response:
-    body = await _json_body(request)
-    token = _require_session(request, body)
-    hid = audio.find_cached(str(body.get("mediaKey") or ""), str(body.get("lang") or "").lower())
-    if not hid:
-        raise DualServiceError(404, "valid cached audio track not found")
-    metadata = audio.metadata(hid)
-    return _json({
-        "url": _audio_url(request, hid, token),
-        "cached": True,
-        "hid": hid,
-        "audio_fingerprint": metadata.get("source_fingerprint", ""),
-    })
 
 
 async def cache_status(request: web.Request) -> web.Response:
@@ -237,11 +224,6 @@ async def cache_status(request: web.Request) -> web.Response:
             "cached": bool(offset and offset.get("status") == "ok"),
             "status": offset.get("status") if offset else None,
             "updated_at": offset.get("updated_at") if offset else None,
-        },
-        "video": {
-            "cached": False,
-            "persistent": False,
-            "mode": "direct",
         },
     })
 

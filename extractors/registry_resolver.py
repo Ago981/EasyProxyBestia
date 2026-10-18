@@ -306,7 +306,7 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
             host = host.lower()
             entry = _entry_for_host(host)
             if entry is not None:
-                return _instance_for_host(self, entry, host, url, request_headers, bypass_warp)
+                return _instance(self, entry, request_headers, bypass_warp, url=url, host=host)
 
         # 2. Auto-detection basata sull'URL
         parsed_url = urllib.parse.urlparse(url)
@@ -320,13 +320,13 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
             or ADS_SERIES_PATTERN.fullmatch(parsed_url.path)
         )
         if parsed_url.path.startswith("/api/player-sources/") or (ads_host_ok and ads_path_ok):
-            return _instance_for_url(self, _BY_NAME["ads"], url, request_headers, bypass_warp)
+            return _instance(self, _BY_NAME["ads"], request_headers, bypass_warp, url=url)
 
         # FCTV33: link diretto firmato con marker #fctv33&matchId=..&streamId=.. (generato da
         # fctv33_omg_universal). Va riconosciuto PRIMA dello shortcut "link diretto" sotto,
         # altrimenti finirebbe nel generic con un token legato all'IP/scaduto.
         if _FCTV33_MARKER.search(url):
-            return _instance_for_url(self, _BY_NAME["fctv33"], url, request_headers, bypass_warp)
+            return _instance(self, _BY_NAME["fctv33"], request_headers, bypass_warp, url=url)
 
         # ✅ NUOVO: Salta estrattori specifici se l'URL sembra già un link diretto a un media
         # (evita di provare a estrarre un .mp4 come se fosse una pagina HTML)
@@ -336,7 +336,7 @@ async def resolve_extractor(self, url: str, request_headers: dict, host: str = N
 
         for entry in _ENTRIES:
             if entry.match is not None and entry.match(url, parsed_url):
-                return _instance_for_url(self, entry, url, request_headers, bypass_warp)
+                return _instance(self, entry, request_headers, bypass_warp, url=url)
 
         # ✅ Fallback al GenericHLSExtractor per qualsiasi altro URL: gestisce
         # estensioni sconosciute o URL senza estensione.
@@ -359,31 +359,29 @@ def _cached(self, key_name: str, cls, request_headers, proxy_list, bypass_warp, 
     return instance
 
 
-def _instance_for_host(self, entry, host, url, request_headers, bypass_warp):
-    target = entry.host_proxy or host
-    if target == "url":
-        target = url
-    kwargs = {"extractor_name": entry.proxy_extractor_name} if entry.proxy_extractor_name else {}
-    proxy = get_proxy_for_url(target, bypass_warp=bypass_warp, **kwargs)
-    proxy_list = _build_proxy_list(proxy, entry.host_build_name or host)
-    return _cached(self, entry.key_name or host, entry.cls, request_headers, proxy_list,
-                   bypass_warp, entry.refresh_headers)
+def _instance(self, entry, request_headers, bypass_warp, url=None, host=None):
+    """Build (or reuse) the extractor for a host alias or an auto-detected URL."""
+    if host is not None:
+        target = entry.host_proxy or host
+        if target == "url":
+            target = url
+        key_name = entry.key_name or host
+        build_name = entry.host_build_name or host
+    else:
+        target = entry.url_proxy
+        if callable(target):
+            target = target(url, bypass_warp)
+        elif target == "url":
+            target = url
+        key_name = build_name = entry.name
 
-
-def _instance_for_url(self, entry, url, request_headers, bypass_warp):
-    target = entry.url_proxy
-    if callable(target):
-        target = target(url, bypass_warp)
-    elif target == "url":
-        target = url
-    if entry.url_proxy_final:
+    if entry.url_proxy_final and host is None:
         proxy = target
     else:
         kwargs = {"extractor_name": entry.proxy_extractor_name} if entry.proxy_extractor_name else {}
         proxy = get_proxy_for_url(target, bypass_warp=bypass_warp, **kwargs)
-    proxy_list = _build_proxy_list(proxy, entry.name)
-    return _cached(self, entry.name, entry.cls, request_headers, proxy_list,
-                   bypass_warp, entry.refresh_headers)
+    return _cached(self, key_name, entry.cls, request_headers,
+                   _build_proxy_list(proxy, build_name), bypass_warp, entry.refresh_headers)
 
 
 def _generic_instance(self, request_headers, bypass_warp):

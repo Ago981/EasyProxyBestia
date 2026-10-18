@@ -20,8 +20,6 @@ from services.socks_bridge import close_socks_bridges
 import services.proxy_shared as _shared
 from services.proxy_shared import (
     logger,
-    SELECTED_PROXY_CONTEXT,
-    STRICT_PROXY_CONTEXT,
     get_proxy_for_url,
     get_connector_for_proxy,
     get_extractor_proxies,

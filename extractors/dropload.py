@@ -186,12 +186,5 @@ class DroploadExtractor(BaseExtractor):
         }
         mediaflow_endpoint = "proxy_stream_endpoint" if ".mp4" in final_url else self.mediaflow_endpoint
 
-        return {
-            "destination_url": urljoin(url, final_url),
-            "request_headers": req_headers,
-            "mediaflow_endpoint": mediaflow_endpoint,
-            "selected_proxy": self.last_used_proxy,
-            "force_direct": self._force_direct,
-            "bypass_warp": self.bypass_warp_active,
-        }
+        return self._result(urljoin(url, final_url), req_headers, mediaflow_endpoint=mediaflow_endpoint)
 
