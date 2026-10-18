@@ -6,16 +6,10 @@
 :where(:root) {
     --ep-nav-h: 52px;
 
-    --ep-duration-micro: 80ms;
     --ep-duration-quick: 150ms;
     --ep-duration-fast: 250ms;
-    --ep-duration-medium: 350ms;
-    --ep-duration-slow: 400ms;
-    --ep-duration-very-slow: 500ms;
 
     --ep-ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
-    --ep-ease-out: ease-out;
-    --ep-ease-linear: linear;
 
     /* Palette shared by every panel (hoisted from the per-page :root blocks). */
     --surface: rgba(255, 255, 255, 0.03);

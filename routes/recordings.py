@@ -7,7 +7,7 @@ import functools
 import config
 from config import check_password, APP_VERSION
 import config_store
-from routes import admin
+from services.proxy_shared import admin_guard as admin
 from services.proxy_shared import get_public_base_url, read_template
 
 logger = logging.getLogger(__name__)

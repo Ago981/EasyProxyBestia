@@ -37,20 +37,11 @@ from config import (
 from extractors.base import ExtractorError
 from extractors.generic import GenericHLSExtractor
 from extractors.registry_imports import *
-
-try:
-    # Single source of truth for the mirror frontends, defined next to the
-    # extractor itself (extractors/vavoo.py) so the two can't drift apart.
-    # Tuple, not list: it is a fixed shared constant imported by reference —
-    # any importer could accidentally mutate a list in place.
-    # The fallback duplicate only covers the case where the vavoo module
-    # fails to import, keeping auto-detect functional.
-    from extractors.vavoo import VAVOO_MIRROR_DOMAINS
-except Exception:
-    VAVOO_MIRROR_DOMAINS = (
-        "vavoo.to", "kool.to", "vavoo.net", "kool.ws",
-        "huhu.to", "oha.to", "voltop.net",
-    )
+# Single source of truth for the mirror frontends, defined next to the extractor
+# itself (extractors/vavoo.py) so the two can't drift apart. Tuple, not list: it
+# is a fixed shared constant imported by reference — any importer could
+# accidentally mutate a list in place.
+from extractors.vavoo import VAVOO_MIRROR_DOMAINS
 
 _SPORTSONLINE_PATH_PATTERNS = (
     re.compile(r"/channels/[a-z0-9_-]+/[a-z0-9_-]+\.php(?:$|[?#])", re.IGNORECASE),

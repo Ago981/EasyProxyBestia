@@ -5,7 +5,7 @@ import functools
 from aiohttp import web
 
 from config import check_password
-from routes import admin, json_response
+from services.proxy_shared import admin_guard as admin, json_response
 from services import tor_proxy
 from services.proxy_shared import read_template
 

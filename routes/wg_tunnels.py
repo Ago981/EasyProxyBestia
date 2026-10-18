@@ -7,7 +7,7 @@ from aiohttp import web
 
 import config_store
 from config import check_password
-from routes import admin, json_response
+from services.proxy_shared import admin_guard as admin, json_response
 from services import wg_tunnels
 from services.proxy_shared import read_template
 
