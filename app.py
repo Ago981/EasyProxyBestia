@@ -116,8 +116,6 @@ def create_app():
     # ✅ Health check endpoint
     app.router.add_get('/health', lambda r: web.json_response({"status": "ok", "version": APP_VERSION}))
     app.router.add_get('/api/dual/memory', dual_service.handle_memory)
-    # Backward-compatible alias for existing monitoring clients.
-    app.router.add_get('/api/sidecar/memory', dual_service.handle_memory)
 
     app.router.add_post('/dual/sync/links', proxy.handle_dual_sync_links)
     app.router.add_get('/dual/manifest.m3u8', proxy.handle_dual_server_m3u8)
