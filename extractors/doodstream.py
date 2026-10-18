@@ -220,5 +220,3 @@ class DoodStreamExtractor(BaseExtractor):
             "bypass_warp": self.bypass_warp_active,
         }
 
-    async def close(self):
-        pass

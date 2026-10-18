@@ -157,5 +157,3 @@ class VidXgoExtractor(BaseExtractor):
             "disable_ssl": True,
         }
 
-    async def close(self):
-        pass

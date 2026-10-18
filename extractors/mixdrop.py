@@ -194,5 +194,3 @@ class MixdropExtractor(BaseExtractor):
         proxy = self.last_used_proxy if selected_proxy is None and not self._force_direct else selected_proxy
         return {"destination_url": video_url, "request_headers": headers, "mediaflow_endpoint": self.mediaflow_endpoint, "bypass_warp": self.bypass_warp_active, "selected_proxy": proxy, "force_direct": self._force_direct}
 
-    async def close(self):
-        pass
