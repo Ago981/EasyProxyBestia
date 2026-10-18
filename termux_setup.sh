@@ -298,7 +298,7 @@ if command -v warp-register >/dev/null 2>&1 && command -v wireproxy >/dev/null 2
             echo "WARP registration failed; continuing without WARP."
         fi
     fi
-    if [ -s "$WARP_CONFIG_FILE" ] && bash "$EP_DIR/scripts/warp_userspace_ctl.sh" start; then
+    if [ -s "$WARP_CONFIG_FILE" ] && bash "$EP_DIR/scripts/wireproxy_ctl.sh" start; then
         # Wait for the SOCKS5 listener like entrypoint.sh does in Docker.
         for _ in {1..20}; do
             if (exec 3<>/dev/tcp/127.0.0.1/1080) 2>/dev/null; then

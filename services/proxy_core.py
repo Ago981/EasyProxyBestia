@@ -38,7 +38,7 @@ from services.proxy_shared import (
 # /bin/sh (git checkouts do not carry the executable bit).
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WARP_CTL_SCRIPT = os.environ.get("WARP_CTL_SCRIPT") or os.path.join(
-    _PROJECT_DIR, "scripts", "warp_userspace_ctl.sh"
+    _PROJECT_DIR, "scripts", "wireproxy_ctl.sh"
 )
 
 

@@ -164,13 +164,72 @@ class HLSProxyPagesMixin:
                 content_type="text/html",
             )
 
+    # API docs pages: one shell (templates/api_docs.html) + the engine block.
+    _API_DOCS_ENGINES = {
+        "docs": (
+            "EasyProxy API Docs",
+            '    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">\n'
+            "    <style>\n"
+            "        html, body { margin: 0; background: #f4f7fb; }\n"
+            "        .topbar { display: none; }\n"
+            "        .swagger-ui .info .title { color: #0f172a; }\n"
+            "    </style>\n",
+            '    <div id="swagger-ui"></div>\n'
+            '    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>\n'
+            "    <script>\n"
+            "        window.ui = SwaggerUIBundle({\n"
+            "            url: '/openapi.json',\n"
+            "            dom_id: '#swagger-ui',\n"
+            "            deepLinking: true,\n"
+            "            presets: [SwaggerUIBundle.presets.apis],\n"
+            "            layout: 'BaseLayout'\n"
+            "        });\n"
+            "    </script>\n",
+        ),
+        "redoc": (
+            "EasyProxy ReDoc",
+            "    <style>\n"
+            "        html, body { margin: 0; padding: 0; background: #f8fafc; font-family: Arial, sans-serif; }\n"
+            "        .fallback { display: none; max-width: 900px; margin: 48px auto; padding: 24px;\n"
+            "            background: white; border: 1px solid #e2e8f0; border-radius: 16px;\n"
+            "            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }\n"
+            "        .fallback h1 { margin-top: 0; color: #0f172a; }\n"
+            "        .fallback a { color: #0284c7; text-decoration: none; }\n"
+            "    </style>\n",
+            '    <redoc spec-url="/openapi.json"></redoc>\n\n'
+            '    <div id="fallback" class="fallback">\n'
+            "        <h1>ReDoc non disponibile</h1>\n"
+            "        <p>La vista ReDoc non si e caricata correttamente dal CDN.</p>\n"
+            '        <p>Puoi usare <a href="/docs">/docs</a> per Swagger UI oppure aprire '
+            '<a href="/openapi.json">/openapi.json</a>.</p>\n'
+            "    </div>\n\n"
+            "    <script>\n"
+            "        window.addEventListener('error', function (event) {\n"
+            "            if (event && event.target && event.target.tagName === 'SCRIPT') {\n"
+            "                document.getElementById('fallback').style.display = 'block';\n"
+            "            }\n"
+            "        }, true);\n"
+            "    </script>\n"
+            '    <script src="https://unpkg.com/redoc@2.1.3/bundles/redoc.standalone.js"></script>\n',
+        ),
+    }
+
+    def _render_api_docs(self, engine: str) -> web.Response:
+        title, head, body = self._API_DOCS_ENGINES[engine]
+        html_content = (
+            self._read_template("api_docs.html")
+            .replace("{{DOCS_TITLE}}", title)
+            .replace("{{DOCS_HEAD}}", head)
+            .replace("{{DOCS_BODY}}", body)
+        )
+        return web.Response(text=html_content, content_type="text/html")
+
     async def handle_docs(self, request):
         """Serve Swagger UI per la documentazione API."""
         try:
-            html_content = self._read_template("docs.html")
-            return web.Response(text=html_content, content_type="text/html")
+            return self._render_api_docs("docs")
         except Exception as e:
-            logger.error(f"Unable to load 'docs.html': {e}")
+            logger.error(f"Unable to load the API docs shell: {e}")
             return web.Response(
                 text="<h1>Error 500</h1><p>Unable to load API docs.</p>",
                 status=500,
@@ -180,10 +239,9 @@ class HLSProxyPagesMixin:
     async def handle_redoc(self, request):
         """Serve ReDoc per la documentazione API."""
         try:
-            html_content = self._read_template("redoc.html")
-            return web.Response(text=html_content, content_type="text/html")
+            return self._render_api_docs("redoc")
         except Exception as e:
-            logger.error(f"Unable to load 'redoc.html': {e}")
+            logger.error(f"Unable to load the API docs shell: {e}")
             return web.Response(
                 text="<h1>Error 500</h1><p>Unable to load ReDoc.</p>",
                 status=500,

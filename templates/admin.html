@@ -621,21 +621,12 @@
     </div>
 </div>
 
+    <script src="/static/ep-ui.js?v={{APP_VERSION}}"></script>
 <script>
 let config = {};
 let extractorProxies = {};
 let sslOff = false;
 let extractorProxyMode = 'proxy';
-
-function formatBytes(bytes, decimals = 2) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
-
 function formatSpeed(bytesPerSec) {
     if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
     const k = 1024;
@@ -676,13 +667,6 @@ function withAdminQuery(path) {
     const pw = new URLSearchParams(window.location.search).get('api_password');
     return path + (pw ? '?api_password=' + encodeURIComponent(pw) : '');
 }
-
-function escHtml(s) {
-    return String(s ?? '').replace(/[&<>"']/g, function(c) {
-        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
-    });
-}
-
 async function pollAdminJob(url, resultEl, busyText) {
     const deadline = Date.now() + 15 * 60 * 1000;
     let data = null;
@@ -836,14 +820,6 @@ function renderActiveStreams(streams) {
             <td colspan="3" style="padding:24px;text-align:center;color:var(--text-muted)">No active streams</td>
         </tr>`;
     }
-}
-
-
-function toast(msg, type='success') {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast toast-' + type + ' show';
-    setTimeout(() => t.classList.remove('show'), 2500);
 }
 
 function setToggle(id, value) {

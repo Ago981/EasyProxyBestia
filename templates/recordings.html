@@ -933,6 +933,7 @@
         </div>
     </div>
 
+    <script src="/static/ep-ui.js?v={{APP_VERSION}}"></script>
     <script>
         const API_PASSWORD = new URLSearchParams(window.location.search).get('api_password') || '';
         let deleteRecordingId = null;
@@ -958,15 +959,6 @@
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 3000);
         }
-
-        function formatBytes(bytes) {
-            if (!bytes) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
         function formatDuration(seconds) {
             if (!seconds && seconds !== 0) return '-';
             const h = Math.floor(seconds / 3600);
@@ -982,11 +974,6 @@
             const date = new Date(isoString);
             return date.toLocaleString();
         }
-
-        function escHtml(s) {
-            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-
         function getStatusBadge(status, isActive) {
             if (isActive) {
                 return '<span class="status-badge status-recording">Recording</span>';
