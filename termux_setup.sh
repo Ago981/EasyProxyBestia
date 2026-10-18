@@ -46,7 +46,7 @@ termux-setup-storage 2>/dev/null || true
 # otherwise curl and its OpenSSL/ngtcp2 libraries can end up ABI-incompatible.
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
-pkg install -y proot-distro git curl pulseaudio wget screen
+pkg install -y proot-distro git curl wget screen
 log "Termux packages installed."
 
 info "Phase 2/6: Setting up Ubuntu environment..."

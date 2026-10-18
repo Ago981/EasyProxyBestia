@@ -34,7 +34,8 @@ from config import (
     get_proxy_for_url,
     get_extractor_proxies,
 )
-from extractors.generic import GenericHLSExtractor, ExtractorError
+from extractors.base import ExtractorError
+from extractors.generic import GenericHLSExtractor
 from extractors.registry_imports import *
 
 try:
