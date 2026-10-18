@@ -66,20 +66,6 @@ RUN set -eux; \
     rm -f /tmp/wireproxy.tar.gz /tmp/wireproxy.checksums; \
     mkdir -p /etc/wireguard
 
-# Install Ookla Speedtest CLI for the admin panel speedtest
-ARG SPEEDTEST_VERSION=1.2.0
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-        amd64) speedtest_arch="x86_64" ;; \
-        arm64) speedtest_arch="aarch64" ;; \
-        *) echo "Unsupported architecture for speedtest: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://install.speedtest.net/app/cli/ookla-speedtest-${SPEEDTEST_VERSION}-linux-${speedtest_arch}.tgz" -o /tmp/speedtest.tgz; \
-    tar -xzf /tmp/speedtest.tgz -C /usr/local/bin speedtest; \
-    chmod +x /usr/local/bin/speedtest; \
-    rm -f /tmp/speedtest.tgz
-
 # 2. EasyProxy Dependencies
 WORKDIR /app
 COPY requirements.txt .

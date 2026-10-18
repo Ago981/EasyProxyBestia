@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 import random
 import re
@@ -75,6 +76,32 @@ def read_template(name: str) -> str:
     """Read a template file with the shared {{APP_VERSION}} substitution."""
     with open(os.path.join(_TEMPLATES_DIR, name), "r", encoding="utf-8") as handle:
         return handle.read().replace("{{APP_VERSION}}", APP_VERSION)
+
+
+def json_response(payload, status=200):
+    """JSON response helper shared by the admin pages and route modules."""
+    return web.json_response(payload, status=status)
+
+
+def unauthorized():
+    return json_response({"error": "Unauthorized: Invalid API Password"}, status=401)
+
+
+def admin_guard(handler):
+    """Answer 401 before running a handler without a valid API password.
+
+    Works for plain handlers and for mixin methods (the request is located
+    among the arguments, so ``self`` does not confuse the guard).
+    """
+
+    @functools.wraps(handler)
+    async def wrapper(*args, **kwargs):
+        request = next((arg for arg in args if isinstance(arg, web.Request)), None)
+        if request is not None and not check_password(request):
+            return unauthorized()
+        return await handler(*args, **kwargs)
+
+    return wrapper
 
 
 def safe_log_endpoint(value: str | None) -> str:
