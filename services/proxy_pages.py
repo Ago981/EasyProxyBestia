@@ -15,7 +15,7 @@ from services import tor_proxy
 from services.proxy_shared import (
     logger, web, APP_VERSION,
     check_password, get_client_ip, PlaylistBuilder, ClientSession, ClientTimeout,
-    TCPConnector, get_connector_for_proxy, API_PASSWORD,
+    TCPConnector, API_PASSWORD,
     get_public_base_url,
 )
 from extractors.registry import *
@@ -25,8 +25,6 @@ from config import (
     reload_config,
     clear_proxy_affinity,
     get_system_stats,
-    get_memory_profile,
-    reset_memory_profiler,
 )
 
 # Background speedtest job state (single run at a time; polled by the panel).
@@ -409,8 +407,6 @@ class HLSProxyPagesMixin:
                 "/license": "Proxy licenze DRM (ClearKey/Widevine) - ?url=<URL> o ?clearkey=<id:key>",
                 "/info": "Pagina HTML con informazioni sul server",
                 "/api/info": "Endpoint JSON con informazioni sul server",
-                "/api/memory/profile": "Profiler tracemalloc: allocazioni Python e crescita dal boot",
-                "/api/memory/profile/reset": "POST: resetta il baseline del profiler",
                 "/api/dual/memory": "RAM used by the integrated DUAL service",
                 "/dual/manifest.m3u8": "DUAL HLS master with synchronized video + audio - ?d=<Base64 JSON>",
                 "/dual/sync/links": "DUAL JSON test for synchronizing video and audio",
@@ -433,18 +429,6 @@ class HLSProxyPagesMixin:
             },
         }
         return web.json_response(info)
-
-    async def handle_memory_profile(self, request):
-        """Return top Python allocations and growth since the profiler baseline."""
-        if not check_password(request):
-            return web.Response(status=401, text="Unauthorized: Invalid API Password")
-        return web.json_response(get_memory_profile(request.query.get("limit", 30)))
-
-    async def handle_memory_profile_reset(self, request):
-        """Reset the tracemalloc baseline used by the memory profiler."""
-        if not check_password(request):
-            return web.Response(status=401, text="Unauthorized: Invalid API Password")
-        return web.json_response(reset_memory_profiler())
 
     # "__SECURITY__" nel JSON marca le operazioni che richiedono api_password.
     def _openapi_spec(self, request) -> dict:
