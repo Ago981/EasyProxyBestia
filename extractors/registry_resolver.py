@@ -37,6 +37,20 @@ from config import (
 from extractors.generic import GenericHLSExtractor, ExtractorError
 from extractors.registry_imports import *
 
+try:
+    # Single source of truth for the mirror frontends, defined next to the
+    # extractor itself (extractors/vavoo.py) so the two can't drift apart.
+    # Tuple, not list: it is a fixed shared constant imported by reference —
+    # any importer could accidentally mutate a list in place.
+    # The fallback duplicate only covers the case where the vavoo module
+    # fails to import, keeping auto-detect functional.
+    from extractors.vavoo import VAVOO_MIRROR_DOMAINS
+except Exception:
+    VAVOO_MIRROR_DOMAINS = (
+        "vavoo.to", "kool.to", "vavoo.net", "kool.ws",
+        "huhu.to", "oha.to", "voltop.net",
+    )
+
 _SPORTSONLINE_PATH_PATTERNS = (
     re.compile(r"/channels/[a-z0-9_-]+/[a-z0-9_-]+\.php(?:$|[?#])", re.IGNORECASE),
     re.compile(r"/hd/hd\d+\.php(?:$|[?#])", re.IGNORECASE),
@@ -169,8 +183,14 @@ _ENTRIES = (
     _Entry("raiplay", RaiPlayExtractor, hosts=("rai", "raiplay"),
            match=_any_of(_sub("mediapolisvod.rai.it/relinker/"), _host_endswith("raiplay.it")),
            key_name="raiplay"),
-    _Entry("vavoo", VavooExtractor, hosts=("vavoo",), match=_sub("vavoo.to"),
-           url_proxy="vavoo.to"),
+    # All mirror frontends share the same mediahubmx backend (same signature,
+    # catalog and cross-compatible resolve), so auto-detect must match every
+    # domain, not just vavoo.to (lower=True => case-insensitive). "url" +
+    # proxy_extractor_name makes the routing layer see the real host for
+    # TRANSPORT_ROUTES/warp-exclusion matching instead of the literal.
+    _Entry("vavoo", VavooExtractor, hosts=("vavoo",),
+           match=_sub(*VAVOO_MIRROR_DOMAINS, lower=True),
+           url_proxy="url", proxy_extractor_name="vavoo"),
     _Entry("vixsrc", VixSrcExtractor, hosts=("vixsrc",),
            match=_all_of(_sub("vixsrc.to/", "unitv.mom/", lower=True),
                          _sub("/movie/", "/tv/", "/iframe/", "/embed/", "/playlist/")),
