@@ -49,18 +49,13 @@ class DroploadExtractor(BaseExtractor):
         super().__init__(request_headers, proxies, extractor_name="dropload", bypass_warp=bypass_warp)
 
     @staticmethod
-    def _extract_m3u8(text: str) -> str | None:
-        match = re.search(r'https?://[^"\'\s]+\.m3u8[^"\'\s]*', text)
-        return match.group(0) if match else None
-
-    @classmethod
-    def _media_from_html(cls, text: str) -> str | None:
-        """Media URL already present in a page (m3u8 first, then mp4)."""
-        url = cls._extract_m3u8(text)
-        if url:
-            return url
-        match = re.search(r'https?://[^"\'\s]+\.mp4[^"\'\s]*', text)
-        return match.group(0) if match else None
+    def _media_from_html(text: str) -> str | None:
+        """Media URL already present in a page, m3u8 before mp4."""
+        for ext in ("m3u8", "mp4"):
+            match = re.search(rf'https?://[^"\'\s]+\.{ext}[^"\'\s]*', text)
+            if match:
+                return match.group(0)
+        return None
 
     async def _solve_turnstile(self, url: str):
         """Return ``(html, cookie_header, user_agent)`` for a solved page."""

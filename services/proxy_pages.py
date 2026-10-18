@@ -392,9 +392,7 @@ class HLSProxyPagesMixin:
     def _openapi_spec(self, request) -> dict:
         """Serve static/openapi.json, patching the per-request fields."""
         if self._openapi_text is None:
-            spec_path = os.path.join(
-                self._template_cache_dir, os.pardir, "static", "openapi.json"
-            )
+            spec_path = os.path.join(self._template_cache_dir, os.pardir, "static", "openapi.json")
             with open(spec_path, "r", encoding="utf-8") as f:
                 self._openapi_text = f.read()
         spec = json.loads(self._openapi_text)

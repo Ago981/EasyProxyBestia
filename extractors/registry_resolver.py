@@ -139,10 +139,6 @@ def _host_endswith(suffix):
     return lambda url, parsed: (parsed.hostname or "").lower().endswith(suffix)
 
 
-def _path_startswith(prefix):
-    return lambda url, parsed: parsed.path.startswith(prefix)
-
-
 def _any_of(*preds):
     return lambda url, parsed: any(pred(url, parsed) for pred in preds)
 
