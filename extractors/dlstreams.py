@@ -230,7 +230,9 @@ class DLStreamsExtractor(BaseExtractor):
     # serve the last known URL only if it still probes alive (never hang the
     # player 40-50s on a dead playlist) with a small backoff so the failing
     # host is not hammered. Stale window tracks the signed-token lifetime (~3-4 min).
-    STREAM_CACHE_SECONDS = 30.0
+    # Fresh window: below the premium token ttl (120s), so one scrape serves
+    # several minutes of polls instead of one slow scrape every 30s.
+    STREAM_CACHE_SECONDS = 90.0
     STREAM_CACHE_STALE_SECONDS = 300.0
     STREAM_CACHE_FAIL_BACKOFF_SECONDS = 15.0
     MAX_HOST_BACKOFF_SECONDS = 3600.0
@@ -703,7 +705,12 @@ class DLStreamsExtractor(BaseExtractor):
             return max(1.0, min(default, _remaining()))
 
         watch_html = ""
-        if urlparse(url).path == "/watch.php" and not self._host_limited_for(url):
+        pinned = self._player_preference.get((channel_id, self._route_key()))
+        if (
+            urlparse(url).path == "/watch.php"
+            and not pinned
+            and not self._host_limited_for(url)
+        ):
             try:
                 async with session.get(
                     url, headers=self.base_headers, timeout=_timeout(3)
