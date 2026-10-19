@@ -891,11 +891,13 @@ class HLSProxyPagesMixin:
                 async with sem:
                     entry = {"extractor": name, "url": url, "ok": False}
                     try:
-                        extractor = await self.get_extractor(url, headers, host=name)
-                        timeout = getattr(extractor, "REQUEST_TIMEOUT_TOTAL", 30)
-                        result = await asyncio.wait_for(
-                            extractor.extract(url), timeout=timeout
-                        )
+                        async with self.borrow_extractor(
+                            url, headers, host=name
+                        ) as extractor:
+                            timeout = getattr(extractor, "REQUEST_TIMEOUT_TOTAL", 30)
+                            result = await asyncio.wait_for(
+                                extractor.extract(url), timeout=timeout
+                            )
                         destination = (result or {}).get("destination_url") or ""
                         entry["ok"] = bool(destination)
                         entry["destination_url"] = destination
