@@ -1,5 +1,6 @@
 import asyncio
 import secrets
+import time
 import urllib.parse
 import aiohttp
 import config as _config
@@ -30,6 +31,10 @@ from services.proxy_shared import (
     request_log_context,
     safe_log_route,
 )
+
+
+_LEGACY_REDIRECT_CACHE: dict = {}
+_LEGACY_REDIRECT_TTL = 120.0
 
 
 class HLSProxyManifestHandlerMixin:
@@ -306,6 +311,22 @@ class HLSProxyManifestHandlerMixin:
                     header_name = param_name[2:]
                     combined_headers[header_name] = param_value
 
+            cache_key = (
+                target_url,
+                request.query.get("host"),
+                bypass_warp,
+                bypass_proxies,
+                selected_proxy or "",
+                force_direct,
+                request.query.get("api_password") or "",
+                *get_extractor_routing_overrides("dlstreams"),
+            )
+            if request.path == "/proxy/manifest.m3u8" and redirect_stream:
+                cached = _LEGACY_REDIRECT_CACHE.get(cache_key)
+                if cached and time.monotonic() - cached[0] < _LEGACY_REDIRECT_TTL:
+                    logger.info("[PLAY] Reusing resolved DLStreams manifest")
+                    return web.HTTPFound(cached[1])
+
             # DUAL's browser test already resolved the final media URL and its
             # required headers. Do not run GenericHLSExtractor again: providers
             # can reject the Referer it guesses even though the raw URL works.
@@ -498,12 +519,18 @@ class HLSProxyManifestHandlerMixin:
                         or request.query.get("url")
                         or request.query.get("d", "")
                     )
+                    full_proxy_url = (
+                        f"{proxy_base}/proxy/hls/manifest.m3u8?{urllib.parse.urlencode(query)}"
+                    )
+                    now = time.monotonic()
+                    for key, (ts, _) in list(_LEGACY_REDIRECT_CACHE.items()):
+                        if now - ts >= _LEGACY_REDIRECT_TTL:
+                            _LEGACY_REDIRECT_CACHE.pop(key, None)
+                    _LEGACY_REDIRECT_CACHE[cache_key] = (now, full_proxy_url)
                     logger.info(
                         "[PLAY] Redirecting DLStreams legacy manifest to the stable proxy URL"
                     )
-                    return web.HTTPFound(
-                        f"{proxy_base}/proxy/hls/manifest.m3u8?{urllib.parse.urlencode(query)}"
-                    )
+                    return web.HTTPFound(full_proxy_url)
 
 
             # --- DASH NATIVO: Riscrive il manifest per segmenti proxati (senza conversione) ---
