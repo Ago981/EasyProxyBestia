@@ -26,6 +26,7 @@ from services.proxy_shared import (
     is_expired_embed_error,
     extractor_name_for_log,
     get_public_base_url,
+    build_relay_url,
     get_extractor_routing_overrides,
     request_log_context,
     safe_log_route,
@@ -465,6 +466,39 @@ class HLSProxyManifestHandlerMixin:
                         stream_url += "&disable_ssl=1"
                     else:
                         stream_url += "?disable_ssl=1"
+
+                # Legacy /proxy/manifest.m3u8 requests for dlstreams pages must
+                # redirect to the stable HLS proxy URL instead of serving the
+                # playlist and re-extracting on every player reload.
+                if (
+                    request.path == "/proxy/manifest.m3u8"
+                    and redirect_stream
+                    and extractor_key == "dlstreams"
+                ):
+                    proxy_base = get_public_base_url(request)
+                    logger.info(
+                        "[PLAY] Redirecting DLStreams legacy manifest to the stable proxy URL"
+                    )
+                    return web.HTTPFound(
+                        build_relay_url(
+                            proxy_base,
+                            "/proxy/hls/manifest.m3u8",
+                            stream_url,
+                            stream_headers,
+                            api_password=request.query.get("api_password"),
+                            bypass_warp=bypass_warp,
+                            bypass_proxies=bypass_proxies,
+                            selected_proxy=selected_proxy,
+                            force_direct=force_direct,
+                            extractor_key=extractor_key,
+                            stream_key=stream_key,
+                            orig_url=(
+                                request.query.get("orig_url")
+                                or request.query.get("url")
+                                or request.query.get("d", "")
+                            ),
+                        )
+                    )
 
 
             # --- DASH NATIVO: Riscrive il manifest per segmenti proxati (senza conversione) ---
