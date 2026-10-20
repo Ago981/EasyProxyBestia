@@ -493,7 +493,7 @@ class HLSProxyManifestHandlerMixin:
                 if (
                     request.path == "/proxy/manifest.m3u8"
                     and redirect_stream
-                    and extractor_key == "dlstreams"
+                    and extractor_key in {"dlstreams", "vavoo"}
                 ):
                     proxy_base = get_public_base_url(request)
                     query = {"d": stream_url}
@@ -503,6 +503,8 @@ class HLSProxyManifestHandlerMixin:
                     api_password = request.query.get("api_password")
                     if api_password:
                         query["api_password"] = api_password
+                    if force_disable_ssl or request.query.get("disable_ssl") == "1":
+                        query["disable_ssl"] = "1"
                     if bypass_warp:
                         query["warp"] = "off"
                     if bypass_proxies:
@@ -522,13 +524,15 @@ class HLSProxyManifestHandlerMixin:
                     full_proxy_url = (
                         f"{proxy_base}/proxy/hls/manifest.m3u8?{urllib.parse.urlencode(query)}"
                     )
-                    now = time.monotonic()
-                    for key, (ts, _) in list(_LEGACY_REDIRECT_CACHE.items()):
-                        if now - ts >= _LEGACY_REDIRECT_TTL:
-                            _LEGACY_REDIRECT_CACHE.pop(key, None)
-                    _LEGACY_REDIRECT_CACHE[cache_key] = (now, full_proxy_url)
+                    if extractor_key == "dlstreams":
+                        now = time.monotonic()
+                        for key, (ts, _) in list(_LEGACY_REDIRECT_CACHE.items()):
+                            if now - ts >= _LEGACY_REDIRECT_TTL:
+                                _LEGACY_REDIRECT_CACHE.pop(key, None)
+                        _LEGACY_REDIRECT_CACHE[cache_key] = (now, full_proxy_url)
                     logger.info(
-                        "[PLAY] Redirecting DLStreams legacy manifest to the stable proxy URL"
+                        "[PLAY] Redirecting %s legacy manifest to the stable proxy URL",
+                        extractor_key,
                     )
                     return web.HTTPFound(full_proxy_url)
 

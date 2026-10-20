@@ -2219,6 +2219,31 @@ class HLSProxyStreamingMixin:
                     "Updated CDN token via manifest refresh",
                 )
 
+            # Signed provider URLs (e.g. Vavoo) expire. Send the player to a
+            # fresh stable manifest URL so it stops retrying the expired one.
+            if "manifest.m3u8" in request.path and new_stream_url != stream_url:
+                query = {"d": new_stream_url}
+                for key, value in (new_headers or {}).items():
+                    query[f"h_{key}"] = str(value)
+                for name in (
+                    "api_password", "disable_ssl", "warp", "proxy", "direct",
+                ):
+                    value = request.query.get(name)
+                    if value:
+                        query[name] = value
+                if refreshed.get("disable_ssl") or (new_headers or {}).get("X-EasyProxy-Disable-SSL") == "1":
+                    query["disable_ssl"] = "1"
+                if extractor_key:
+                    query["extractor_key"] = extractor_key
+                if stream_key:
+                    query["stream_key"] = stream_key
+                query["orig_url"] = orig_url
+                logger.info("↪️ [Manifest Refresh] Redirecting to fresh stable URL")
+                return web.HTTPFound(
+                    f"{get_public_base_url(request)}/proxy/hls/manifest.m3u8?"
+                    f"{urllib.parse.urlencode(query)}"
+                )
+
             return await self._proxy_stream(
                 request,
                 new_stream_url,
