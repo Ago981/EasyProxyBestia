@@ -223,56 +223,6 @@ def get_public_base_url(request):
     host = forwarded_host.split(",", 1)[0].strip() or request.host
     return f"{scheme}://{host}"
 
-def build_relay_url(
-    proxy_base: str,
-    endpoint: str,
-    stream_url: str,
-    stream_headers: dict | None = None,
-    *,
-    api_password: str | None = None,
-    bypass_warp: bool = False,
-    bypass_proxies: bool = False,
-    selected_proxy: str | None = None,
-    force_direct: bool = False,
-    disable_ssl: bool = False,
-    extractor_key: str | None = None,
-    stream_key: str | None = None,
-    orig_url: str = "",
-    max_res: bool = False,
-    extra_params: dict | None = None,
-    redirect_stream: bool = False,
-) -> str:
-    """Build a stable proxy relay URL from extracted stream details."""
-    query = {"d": stream_url}
-    for key, value in (stream_headers or {}).items():
-        query[f"h_{key}"] = str(value)
-    if api_password:
-        query["api_password"] = api_password
-    if disable_ssl:
-        query["disable_ssl"] = "1"
-    if bypass_warp:
-        query["warp"] = "off"
-    if bypass_proxies:
-        query["proxy"] = "off"
-    elif selected_proxy:
-        query["proxy"] = selected_proxy
-    if force_direct:
-        query["direct"] = "1"
-    if extractor_key:
-        query["extractor_key"] = extractor_key
-    if stream_key:
-        query["stream_key"] = stream_key
-    if orig_url:
-        query["orig_url"] = orig_url
-    if max_res:
-        query["max_res"] = "true"
-    for key, value in (extra_params or {}).items():
-        if value is not None:
-            query[str(key)] = str(value)
-    if redirect_stream:
-        query["redirect_stream"] = "true"
-    return f"{proxy_base}{endpoint}?{urllib.parse.urlencode(query)}"
-
 def hex_to_b64url(hex_str: str) -> str:
     return (
         base64.urlsafe_b64encode(binascii.unhexlify(hex_str))

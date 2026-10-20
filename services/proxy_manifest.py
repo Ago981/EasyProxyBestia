@@ -26,7 +26,6 @@ from services.proxy_shared import (
     is_expired_embed_error,
     extractor_name_for_log,
     get_public_base_url,
-    build_relay_url,
     get_extractor_routing_overrides,
     request_log_context,
     safe_log_route,
@@ -476,28 +475,34 @@ class HLSProxyManifestHandlerMixin:
                     and extractor_key == "dlstreams"
                 ):
                     proxy_base = get_public_base_url(request)
+                    query = {"d": stream_url}
+                    query.update(
+                        {f"h_{key}": value for key, value in stream_headers.items()}
+                    )
+                    api_password = request.query.get("api_password")
+                    if api_password:
+                        query["api_password"] = api_password
+                    if bypass_warp:
+                        query["warp"] = "off"
+                    if bypass_proxies:
+                        query["proxy"] = "off"
+                    elif selected_proxy:
+                        query["proxy"] = selected_proxy
+                    if force_direct:
+                        query["direct"] = "1"
+                    query["extractor_key"] = extractor_key
+                    if stream_key:
+                        query["stream_key"] = stream_key
+                    query["orig_url"] = (
+                        request.query.get("orig_url")
+                        or request.query.get("url")
+                        or request.query.get("d", "")
+                    )
                     logger.info(
                         "[PLAY] Redirecting DLStreams legacy manifest to the stable proxy URL"
                     )
                     return web.HTTPFound(
-                        build_relay_url(
-                            proxy_base,
-                            "/proxy/hls/manifest.m3u8",
-                            stream_url,
-                            stream_headers,
-                            api_password=request.query.get("api_password"),
-                            bypass_warp=bypass_warp,
-                            bypass_proxies=bypass_proxies,
-                            selected_proxy=selected_proxy,
-                            force_direct=force_direct,
-                            extractor_key=extractor_key,
-                            stream_key=stream_key,
-                            orig_url=(
-                                request.query.get("orig_url")
-                                or request.query.get("url")
-                                or request.query.get("d", "")
-                            ),
-                        )
+                        f"{proxy_base}/proxy/hls/manifest.m3u8?{urllib.parse.urlencode(query)}"
                     )
 
 

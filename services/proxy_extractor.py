@@ -10,7 +10,6 @@ from services.proxy_shared import (
     check_vavoo_request,
     ManifestRewriter,
     get_public_base_url,
-    build_relay_url,
     get_extractor_routing_overrides,
     request_log_context,
     safe_log_route,
@@ -347,30 +346,56 @@ class HLSProxyExtractorHandlerMixin:
             ):
                 endpoint = "/proxy/mpd/manifest.m3u8"
 
+            encoded_url = urllib.parse.quote(stream_url, safe="")
             forced_max_res = self._request_forces_max_res(
                 request,
                 extractor_key,
                 "mpd" if endpoint.endswith("/manifest.mpd") else "hls",
             )
-            api_password = request.query.get("api_password")
-            full_proxy_url = build_relay_url(
-                proxy_base,
-                endpoint,
-                stream_url,
-                stream_headers,
-                api_password=api_password,
-                bypass_warp=bypass_warp,
-                bypass_proxies=BYPASS_PROXIES_CONTEXT.get(),
-                selected_proxy=selected_proxy,
-                force_direct=force_direct,
-                disable_ssl=force_disable_ssl,
-                extractor_key=extractor_key,
-                stream_key=stream_key,
-                orig_url=request.query.get("orig_url") or url,
-                max_res=forced_max_res,
-                extra_params=result_query_params,
-                redirect_stream=redirect_stream,
+            header_params = "".join(
+                [
+                    f"&h_{urllib.parse.quote(key)}={urllib.parse.quote(value)}"
+                    for key, value in stream_headers.items()
+                ]
             )
+
+            # Aggiungi api_password se presente
+            api_password = request.query.get("api_password")
+            if api_password:
+                header_params += f"&api_password={api_password}"
+
+            if force_disable_ssl:
+                header_params += "&disable_ssl=1"
+
+            if bypass_warp:
+                header_params += "&warp=off"
+            if BYPASS_PROXIES_CONTEXT.get():
+                header_params += "&proxy=off"
+            elif selected_proxy:
+                header_params += f"&proxy={urllib.parse.quote(selected_proxy)}"
+            if force_direct:
+                header_params += "&direct=1"
+            orig_url_val = request.query.get("orig_url") or url
+            if orig_url_val:
+                header_params += f"&orig_url={urllib.parse.quote(orig_url_val, safe='')}"
+            if extractor_key:
+                header_params += f"&extractor_key={urllib.parse.quote(extractor_key, safe='')}"
+            if stream_key:
+                header_params += f"&stream_key={urllib.parse.quote(stream_key, safe='')}"
+            if forced_max_res:
+                header_params += "&max_res=true"
+            for key, value in result_query_params.items():
+                header_params += (
+                    f"&{urllib.parse.quote(key, safe='')}="
+                    f"{urllib.parse.quote(value, safe='')}"
+                )
+
+            # 1. URL COMPLETO (Solo per il redirect)
+            full_proxy_url = f"{proxy_base}{endpoint}?d={encoded_url}{header_params}"
+
+            # Carry over redirect_stream param for nested redirects
+            if redirect_stream:
+                full_proxy_url += "&redirect_stream=true"
 
             # DLStreams extraction is slow and rate-limited: send the player to
             # the stable proxy manifest instead of serving it from this endpoint,
