@@ -646,15 +646,18 @@ class HLSProxyStreamingMixin:
                 elif key.lower() == "cookie":
                     headers["Cookie"] = headers.pop(key)
 
-            # Pass through range and validation headers from client
+            # Image-wrapped segments must be fetched whole: a partial PNG
+            # cannot be unwrapped and would be dropped as 204, stalling iOS
+            # players that probe with a byte range.
+            image_segment = self._is_image_url(segment_url)
             for header in ["range", "if-none-match", "if-modified-since"]:
-                if header in request.headers:
+                if header in request.headers and not (header == "range" and image_segment):
                     headers[header] = request.headers[header]
 
             # DASH SegmentList relays carry the source byte-range in the
             # generated URL. Forward it when the player sends no Range header.
             source_range = request.query.get("range")
-            if source_range and re.fullmatch(r"\d+-\d+", source_range):
+            if source_range and not image_segment and re.fullmatch(r"\d+-\d+", source_range):
                 headers["Range"] = f"bytes={source_range}"
 
             # Media segments must not be content-encoded in transit.  aiohttp
@@ -1012,8 +1015,9 @@ class HLSProxyStreamingMixin:
 
             # Passa attraverso alcuni headers del client, ma FILTRA quelli che potrebbero leakare l'IP
             # Rimuoviamo specificamente i condizionali che possono causare 412/416 con URL dinamici
+            image_segment = self._is_image_url(stream_url)
             for header in ["range", "if-none-match", "if-modified-since"]:
-                if header in request.headers:
+                if header in request.headers and not (header == "range" and image_segment):
                     headers[header] = request.headers[header]
 
             # ✅ FIX: Esplicita rimozione di If-Match e If-Range che spesso causano 416 su CDNs dinamici
