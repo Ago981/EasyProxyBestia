@@ -913,4 +913,18 @@ class ManifestRewriter:
             existing = max((int(v) for v in re.findall(r"#EXT-X-TARGETDURATION:\s*(\d+)", text)), default=0)
             target = max(existing, math.ceil(max(durations)))
             text = re.sub(r"#EXT-X-TARGETDURATION:\s*\d+", f"#EXT-X-TARGETDURATION:{target}", text)
+        if (
+            "#EXTINF" in text
+            and "#EXT-X-ENDLIST" not in text
+            and "#EXT-X-PLAYLIST-TYPE:VOD" not in text
+            and "#EXT-X-START:" not in text
+        ):
+            # Start live playback behind the edge: gives native players a
+            # multi-segment cushion instead of starting with an empty buffer.
+            text = text.replace(
+                "#EXTM3U",
+                "#EXTM3U\n#EXT-X-START:TIME-OFFSET=-18.0",
+                1,
+            )
+
         return ManifestRewriter._ensure_hls_version(text)
