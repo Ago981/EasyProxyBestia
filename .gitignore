@@ -15,6 +15,7 @@ dlstreams_activity.txt
 !/scripts/cinejoy_runner.mjs
 !/scripts/pow_solver.js
 !/scripts/build_windows_dist.py
+!/scripts/get_version.py
 config.json
 /downloaded_files
 /cache

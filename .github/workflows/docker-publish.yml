@@ -30,7 +30,7 @@ jobs:
         id: meta
         shell: bash
         run: |
-          CONFIG_VER=$(python -c "import config; print(config.APP_VERSION.lstrip('v'))")
+          CONFIG_VER=$(python scripts/get_version.py)
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"
           elif [ -n "${{ inputs.tag_name }}" ]; then
@@ -116,7 +116,7 @@ jobs:
         id: tag
         shell: bash
         run: |
-          CONFIG_VER=$(python -c "import config; print(config.APP_VERSION.lstrip('v'))")
+          CONFIG_VER=$(python scripts/get_version.py)
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"
           elif [ -n "${{ inputs.tag_name }}" ]; then

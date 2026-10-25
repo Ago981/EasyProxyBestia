@@ -42,28 +42,7 @@ To run the container and persist config/recordings on your host machine, mount t
 docker run -d -p 7860:7860 -v ./data:/data --name EasyProxy ghcr.io/realbestia1/easyproxy:latest
 ```
 
-### 🐍 Python (Local)
-
-#### Prerequisites (All Platforms)
-- **Python 3.11+**
-- **Git** (for cloning dependencies)
-
-#### 🪟 Windows Setup
-The easiest way to get EasyProxy plus solvers on Windows:
-1. Clone the repository and enter the folder.
-2. Run **`start_full.bat`**.
-*This script automatically handles CF Turnstile Solver, patches, and dependencies.*
-
-#### 🐧 Linux / macOS Setup
-1. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. **Start EasyProxy**:
-   ```bash
-   python app.py
-   ```
-#### 📱 Termux (Android)
+### 📱 Termux (Android)
 EasyProxy plus solvers is fully supported on Android via Termux + Ubuntu proot.
 
 The setup supports proot-distro 5 and earlier releases, and installs Python dependencies in an isolated virtual environment at `/root/EasyProxy/.venv`.
