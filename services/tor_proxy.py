@@ -221,8 +221,18 @@ def _repair_tor_data_permissions(tor_uid: int, tor_gid: int) -> None:
 
 def _format_torrc_path(path: str) -> str:
     if os.name == "nt":
-        escaped = os.path.abspath(path).replace("\\", "\\\\")
-        return f'"{escaped}"'
+        p = os.path.abspath(path)
+        try:
+            import ctypes
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            buf = ctypes.create_unicode_buffer(500)
+            res = ctypes.windll.kernel32.GetShortPathNameW(p, buf, 500)
+            if res:
+                return buf.value.replace("\\", "/")
+        except Exception:
+            pass
+        escaped = p.replace("\\", "\\\\")
+        return f'"{escaped}"' if " " in escaped else escaped
     return path
 
 def _write_torrc() -> None:
@@ -272,13 +282,13 @@ def _write_torrc() -> None:
         f"ControlPort {TOR_CONTROL_HOST}:{TOR_CONTROL_PORT}",
         "CookieAuthentication 1",
         f"CookieAuthFile {_format_torrc_path(os.path.join(TOR_DATA_DIR, 'control_auth_cookie'))}",
-        f"Log notice file {os.path.abspath(TOR_LOG_PATH).replace(os.sep, '/')}",
+        f"Log notice file {_format_torrc_path(TOR_LOG_PATH)}",
     ]
     lyrebird = _lyrebird_binary()
     use_bridges = bool(config_store.get("tor_use_bridges", True if os.name == "nt" and lyrebird else False))
     if use_bridges and lyrebird:
         lines.append("UseBridges 1")
-        lyrebird_cmd = f'"{lyrebird}"' if " " in lyrebird else lyrebird
+        lyrebird_cmd = _format_torrc_path(lyrebird)
         lines.append(f"ClientTransportPlugin snowflake exec {lyrebird_cmd}")
         lines.append("Bridge snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72 fingerprint=2B280B23E1107BB62ABFC40DDCC8824814F80A72 url=https://1098762253.rsc.cdn77.org/ fronts=app.datapacket.com,www.datapacket.com ice=stun:stun.epygi.com:3478,stun:stun.uls.co.za:3478,stun:stun.voipgate.com:3478,stun:stun.mixvoip.com:3478,stun:stun.telnyx.com:3478,stun:stun.hot-chilli.net:3478,stun:stun.fitauto.ru:3478,stun:stun.m-online.net:3478 utls-imitate=hellorandomizedalpn")
         lines.append("Bridge snowflake 192.0.2.4:80 8838024498816A039FCBBAB14E6F40A0843051FA fingerprint=8838024498816A039FCBBAB14E6F40A0843051FA url=https://1098762253.rsc.cdn77.org/ fronts=app.datapacket.com,www.datapacket.com ice=stun:stun.epygi.com:3478,stun:stun.uls.co.za:3478,stun:stun.voipgate.com:3478,stun:stun.mixvoip.com:3478,stun:stun.telnyx.com:3478,stun:stun.hot-chilli.net:3478,stun:stun.fitauto.ru:3478,stun:stun.m-online.net:3478 utls-imitate=hellorandomizedalpn")
