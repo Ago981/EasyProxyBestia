@@ -49,9 +49,9 @@ def _tor_binary() -> str | None:
     from pathlib import Path
     bases = []
     if getattr(sys, "frozen", False):
+        bases.append(Path(sys.executable).parent)
         if hasattr(sys, "_MEIPASS"):
             bases.append(Path(sys._MEIPASS))
-        bases.append(Path(sys.executable).parent)
     else:
         bases.append(Path(__file__).resolve().parent.parent)
 
@@ -74,9 +74,9 @@ def _lyrebird_binary() -> str | None:
     from pathlib import Path
     bases = []
     if getattr(sys, "frozen", False):
+        bases.append(Path(sys.executable).parent)
         if hasattr(sys, "_MEIPASS"):
             bases.append(Path(sys._MEIPASS))
-        bases.append(Path(sys.executable).parent)
     else:
         bases.append(Path(__file__).resolve().parent.parent)
 
@@ -95,9 +95,9 @@ def _resolve_geoip_files() -> tuple[str | None, str | None]:
     from pathlib import Path
     bases = []
     if getattr(sys, "frozen", False):
+        bases.append(Path(sys.executable).parent)
         if hasattr(sys, "_MEIPASS"):
             bases.append(Path(sys._MEIPASS))
-        bases.append(Path(sys.executable).parent)
     else:
         bases.append(Path(__file__).resolve().parent.parent)
     bases.append(Path(config_store.CONFIG_DIR))
@@ -416,7 +416,10 @@ async def _terminate(process: asyncio.subprocess.Process | None) -> None:
     if not process or process.returncode is not None:
         return
     try:
-        process.send_signal(signal.SIGTERM)
+        if os.name == "nt":
+            process.kill()
+        else:
+            process.send_signal(signal.SIGTERM)
     except ProcessLookupError:
         return
     try:
@@ -592,7 +595,7 @@ def _stale_tor_pids() -> list[int]:
         pass
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
-            if (proc.info["name"] or "").lower() != "tor":
+            if (proc.info["name"] or "").lower() not in ("tor", "tor.exe"):
                 continue
             cmdline = " ".join(proc.info["cmdline"] or [])
             if proc.info["pid"] in candidates or TORRC_PATH in cmdline:
@@ -603,7 +606,7 @@ def _stale_tor_pids() -> list[int]:
     pids = []
     for pid in candidates - skip:
         try:
-            if (psutil.Process(pid).name() or "").lower() == "tor":
+            if (psutil.Process(pid).name() or "").lower() in ("tor", "tor.exe"):
                 pids.append(pid)
         except (psutil.Error, OSError):
             continue
@@ -616,7 +619,8 @@ async def _terminate_stale_tor() -> list[int]:
     victims = []
     for pid in pids:
         try:
-            psutil.Process(pid).terminate()
+            p = psutil.Process(pid)
+            p.kill()
             victims.append(pid)
         except (psutil.Error, OSError):
             continue
@@ -643,6 +647,7 @@ async def _start() -> None:
         if not available():
             raise TorError("Tor is not installed; use the EasyProxy Docker image")
         set_bind(get_bind())
+        await _terminate_stale_tor()
         _write_torrc()
         await _verify_config()
         host, port = _split_bind(get_bind())
@@ -655,8 +660,8 @@ async def _start() -> None:
                 creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
                 process = await asyncio.create_subprocess_exec(
                     tor_cmd, "-f", TORRC_PATH, "--RunAsDaemon", "0",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                     creationflags=creationflags,
                 )
                 _process = process
