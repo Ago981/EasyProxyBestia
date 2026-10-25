@@ -224,11 +224,13 @@ def _format_torrc_path(path: str) -> str:
         p = os.path.abspath(path)
         try:
             import ctypes
-            os.makedirs(os.path.dirname(p), exist_ok=True)
+            # GetShortPathNameW only works on existing paths: shorten the parent dir
+            # (files like tor.log may not exist yet), then re-append the name.
+            parent, name = os.path.split(p)
+            os.makedirs(parent, exist_ok=True)
             buf = ctypes.create_unicode_buffer(500)
-            res = ctypes.windll.kernel32.GetShortPathNameW(p, buf, 500)
-            if res:
-                return buf.value.replace("\\", "/")
+            if ctypes.windll.kernel32.GetShortPathNameW(parent, buf, 500) and " " not in name:
+                return f"{buf.value}\\{name}".replace("\\", "/")
         except Exception:
             pass
         escaped = p.replace("\\", "\\\\")
