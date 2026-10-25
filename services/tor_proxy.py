@@ -287,7 +287,7 @@ def _write_torrc() -> None:
         f"Log notice file {_format_torrc_path(TOR_LOG_PATH)}",
     ]
     lyrebird = _lyrebird_binary()
-    use_bridges = bool(config_store.get("tor_use_bridges", True if os.name == "nt" and lyrebird else False))
+    use_bridges = bool(config_store.get("tor_use_bridges", False))
     if use_bridges and lyrebird:
         lines.append("UseBridges 1")
         lyrebird_cmd = _format_torrc_path(lyrebird)
