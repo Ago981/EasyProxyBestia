@@ -44,7 +44,7 @@ _SOCKET_CHECK_EXECUTOR = ThreadPoolExecutor(
 )
 
 
-APP_VERSION = "2.13.62"
+APP_VERSION = "2.13.63"
 
 
 def get_extractor_proxies(extractor_name: str) -> list:
