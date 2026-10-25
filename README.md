@@ -22,6 +22,17 @@ A powerful, lightweight proxy server designed to handle HLS, M3U8, and DASH (MPD
 
 ## 🚀 Quick Start
 
+### 🪟 Windows (Standalone Executable - Consigliato su Windows)
+Su Windows **non serve installare nulla** (né Python, né Docker, né tool esterni):
+1. Scarica **`EasyProxy-windows-amd64.zip`** dalla sezione [Releases](https://github.com/realbestia1/EasyProxy/releases/latest).
+2. Estrai lo ZIP in una cartella a tuo piacimento.
+3. Avvia **`EasyProxy.exe`**.
+4. Apri la dashboard nel browser su **`http://localhost:7860`**.
+
+> Tutti i componenti necessari sono preconfigurati e inclusi all'interno: Wireproxy (WARP/WireGuard), Tor (Snowflake) e FlareSolverr (Chromium portatile con risoluzione automatica Turnstile).
+>
+> 🔄 **Auto-aggiornamento integrato**: `EasyProxy.exe` si aggiorna con un clic dal pannello di controllo Web (`/admin`) non appena esce una nuova versione su GitHub, oppure da terminale con `EasyProxy.exe --update`.
+
 ### 🐳 Docker (Recommended)
 The Docker image includes EasyProxy plus integrated CF Turnstile Solver for maximum compatibility. 
 
@@ -97,6 +108,7 @@ easyproxy-update
 
 | Method | Description |
 | :--- | :--- |
+| **Windows Standalone** | Eseguibile portatile autonomo (`EasyProxy.exe`) con Tor, WARP e FlareSolverr inclusi. Nessun prerequisito. |
 | **Docker** | Standard `docker build .` uses the single `Dockerfile` with solvers included. |
 | **Docker Compose** | Run the complete stack (Proxy + Solvers) with `docker-compose up -d`. |
 | **HuggingFace** | Use `Dockerfile-hf` for seamless deployment on HF Spaces. |
