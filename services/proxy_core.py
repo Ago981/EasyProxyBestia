@@ -556,7 +556,7 @@ class HLSProxyCoreMixin:
                         logger.warning("Failed to copy bundled warp_wireproxy.conf: %s", e)
                 elif os.path.isfile(os.path.join(config_store.CONFIG_DIR, "warp.conf")):
                     try:
-                        from scripts.prepare_wireproxy import prepare_wireproxy_conf
+                        from services.wg_tunnels import prepare_wireproxy_conf
                         prepare_wireproxy_conf(os.path.join(config_store.CONFIG_DIR, "warp.conf"), conf_path, 1080)
                     except Exception as e:
                         logger.warning("Failed to prepare warp_wireproxy.conf: %s", e)

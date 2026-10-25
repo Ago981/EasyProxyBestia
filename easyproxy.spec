@@ -6,7 +6,7 @@ block_cipher = None
 
 # Explicit discovery of all local modules
 hidden_imports = []
-for folder in ['extractors', 'services', 'routes', 'utils']:
+for folder in ['extractors', 'services', 'routes', 'utils', 'scripts']:
     for p in Path(folder).glob('*.py'):
         if p.stem != '__init__':
             hidden_imports.append(f'{folder}.{p.stem}')

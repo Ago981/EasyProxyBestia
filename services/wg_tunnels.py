@@ -120,6 +120,30 @@ def _data_dir() -> str:
     return config_store.CONFIG_DIR
 
 
+def prepare_wireproxy_conf(src_path: str, dst_path: str, bind_port: str | int = 1080) -> bool:
+    """Generate wireproxy configuration from a WireGuard profile, binding to a local SOCKS5 port."""
+    if not os.path.isfile(src_path):
+        return False
+    with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    cleaned = re.sub(
+        r"(?m)^(Address|AllowedIPs|DNS)\s*=.*$",
+        lambda m: re.sub(r", *[^, ]*:[^, ]*", "", m.group(0)),
+        content,
+    )
+
+    bind_str = str(bind_port)
+    bind_addr = bind_str if ":" in bind_str else f"127.0.0.1:{bind_str}"
+
+    conf = cleaned.strip() + f"\n\n[Socks5]\nBindAddress = {bind_addr}\n"
+
+    os.makedirs(os.path.dirname(os.path.abspath(dst_path)), exist_ok=True)
+    with open(dst_path, "w", encoding="utf-8") as f:
+        f.write(conf)
+    return True
+
+
 def profile_path(slot: str) -> str:
     return os.path.join(_data_dir(), PROFILE_NAMES[slot])
 
@@ -271,7 +295,6 @@ async def run_ctl(slot: str, action: str, timeout: float = 30.0) -> tuple[int, s
             src_profile = profile_path(slot)
             if not os.path.isfile(src_profile):
                 return 1, f"Profile {src_profile} not found"
-            from scripts.prepare_wireproxy import prepare_wireproxy_conf
             bind_addr = get_bind(slot)
             if not prepare_wireproxy_conf(src_profile, conf_file, bind_addr):
                 return 1, "Failed to write wireproxy config"
