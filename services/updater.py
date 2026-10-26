@@ -180,6 +180,7 @@ set "ZIP=%~dp0temp_update.zip"
 taskkill /f /im EasyProxy.exe >nul 2>&1
 taskkill /f /im flaresolverr.exe >nul 2>&1
 taskkill /f /im tor.exe >nul 2>&1
+taskkill /f /im torclient.exe >nul 2>&1
 taskkill /f /im wireproxy.exe >nul 2>&1
 taskkill /f /im lyrebird.exe >nul 2>&1
 

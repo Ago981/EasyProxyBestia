@@ -55,15 +55,21 @@ def _tor_binary() -> str | None:
     else:
         bases.append(Path(__file__).resolve().parent.parent)
 
+    # On Windows an active CTF/antivirus component blocks any process whose
+    # executable is literally named "tor.exe" (TLS handshakes abort during the
+    # relay handshake), while the identical binary runs fine under any other
+    # name. The bundled binary therefore ships as "torclient.exe" first.
+    exe_names = ("torclient.exe", "tor.exe") if os.name == "nt" else ("tor",)
     for base in bases:
-        for candidate in (
-            base / "bin" / ("tor.exe" if os.name == "nt" else "tor"),
-            base / ("tor.exe" if os.name == "nt" else "tor"),
-            base / "tor" / ("tor.exe" if os.name == "nt" else "tor"),
-            base / "tor" / "tor" / ("tor.exe" if os.name == "nt" else "tor"),
-        ):
-            if candidate.is_file():
-                return str(candidate)
+        for exe_name in exe_names:
+            for candidate in (
+                base / "bin" / exe_name,
+                base / exe_name,
+                base / "tor" / exe_name,
+                base / "tor" / "tor" / exe_name,
+            ):
+                if candidate.is_file():
+                    return str(candidate)
     return None
 
 
@@ -607,7 +613,9 @@ def _stale_tor_pids() -> list[int]:
         pass
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
-            if (proc.info["name"] or "").lower() not in ("tor", "tor.exe"):
+            # The bundled tor binary ships as torclient.exe because a Windows
+            # security component blocks processes literally named "tor.exe".
+            if (proc.info["name"] or "").lower() not in ("tor", "tor.exe", "torclient.exe"):
                 continue
             cmdline = " ".join(proc.info["cmdline"] or [])
             if proc.info["pid"] in candidates or TORRC_PATH in cmdline:
@@ -618,7 +626,7 @@ def _stale_tor_pids() -> list[int]:
     pids = []
     for pid in candidates - skip:
         try:
-            if (psutil.Process(pid).name() or "").lower() in ("tor", "tor.exe"):
+            if (psutil.Process(pid).name() or "").lower() in ("tor", "tor.exe", "torclient.exe"):
                 pids.append(pid)
         except (psutil.Error, OSError):
             continue

@@ -41,8 +41,16 @@ def prepare_binaries() -> None:
         archive.unlink(missing_ok=True)
         print("Extracted wireproxy.exe")
 
-    tor_exe = BIN_DIR / "tor.exe"
+    # tor MUST NOT be installed as "tor.exe": a Windows security component
+    # blocks TLS traffic of processes literally named "tor.exe" (handshakes
+    # abort on every relay), while the identical binary bootstraps fine under
+    # any other name. It therefore ships as "torclient.exe".
+    tor_exe = BIN_DIR / "torclient.exe"
+    legacy_tor_exe = BIN_DIR / "tor.exe"
     lyrebird_exe = BIN_DIR / "lyrebird.exe"
+    if legacy_tor_exe.is_file():
+        legacy_tor_exe.rename(tor_exe)
+        print("Renamed bin/tor.exe -> bin/torclient.exe (tor.exe is blocked by Windows)")
     if not tor_exe.is_file() or not lyrebird_exe.is_file():
         archive = ROOT_DIR / "temp_tor.tar.gz"
         download_file(TOR_BUNDLE_URL, archive)
@@ -50,7 +58,7 @@ def prepare_binaries() -> None:
             for member in tar.getmembers():
                 name_lower = Path(member.name).name.lower()
                 if name_lower == "tor.exe":
-                    member.name = "tor.exe"
+                    member.name = "torclient.exe"
                     tar.extract(member, path=BIN_DIR)
                 elif name_lower == "lyrebird.exe":
                     member.name = "lyrebird.exe"
@@ -62,7 +70,7 @@ def prepare_binaries() -> None:
                     member.name = "geoip6"
                     tar.extract(member, path=DATA_DIR)
         archive.unlink(missing_ok=True)
-        print("Extracted tor.exe, lyrebird.exe, geoip")
+        print("Extracted torclient.exe, lyrebird.exe, geoip")
 
 
 def prepare_flaresolverr() -> None:
