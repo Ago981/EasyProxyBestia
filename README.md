@@ -148,12 +148,12 @@ carry UDP. A missing `DNS`, `MTU` and `PersistentKeepalive` in a pasted profile 
 filled with `1.1.1.1`, `1420` and `25`; IPv6 entries and wg-quick-only directives
 (`Table`, `PostUp`, ...) are stripped before the tunnel starts.
 
-### 🧩 VixSrc FlareSolverr
-The Docker image also contains FlareSolverr, Chromium, and Xvfb. FlareSolverr is
-not started at EasyProxy startup: VixSrc launches it only after detecting a
-Cloudflare challenge, passes the currently selected proxy/WARP route, imports
-the returned cookies and User-Agent, then terminates the process immediately.
-When WARP is active, a missing solver route fails closed instead of using direct.
+### 🧩 FlareSolverr
+The Docker image includes FlareSolverr, Chromium, and Xvfb, operating entirely on-demand to optimize resource usage:
+* **On-Demand Execution:** Launched only when a Cloudflare challenge is detected, and terminates immediately after completion.
+* **Route Integration:** Inherits the currently selected proxy or WARP route.
+* **Session Handover:** Automatically captures and applies the resulting cookies and User-Agent.
+* **Fail-Closed Security:** If WARP is active and the solver route is unavailable, requests fail closed rather than falling back to a direct connection.
 
 ---
 
